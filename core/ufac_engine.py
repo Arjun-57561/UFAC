@@ -9,11 +9,21 @@ from core.schema import UFACResponse
 
 
 def run_ufac(user_data):
-    known = extract_known_facts(user_data)
-    assumptions = detect_assumptions(user_data)
-    unknowns = detect_unknowns(user_data, PM_KISAN_RULES)
+    fact_result = extract_known_facts(user_data)
+    known = fact_result["facts"]
+    fact_consensus = fact_result["consensus"]
 
-    confidence = calculate_confidence(known, unknowns)
+    assumption_result = detect_assumptions(user_data)
+    assumptions = assumption_result["assumptions"]
+    assumption_consensus = assumption_result["consensus"]
+
+    unknown_result = detect_unknowns(user_data, PM_KISAN_RULES)
+    unknowns = unknown_result["unknowns"]
+    unknown_consensus = unknown_result["consensus"]
+
+    confidence_result = calculate_confidence(known, unknowns)
+    confidence = int(confidence_result["confidence"])
+    confidence_consensus = confidence_result["consensus"]
 
     if confidence < 40:
         risk = "HIGH"
@@ -22,7 +32,9 @@ def run_ufac(user_data):
     else:
         risk = "LOW"
 
-    next_steps = generate_next_steps(unknowns)
+    decision_result = generate_next_steps(unknowns)
+    next_steps = decision_result["next_steps"]
+    decision_consensus = decision_result["consensus"]
 
     return UFACResponse(
         answer="Eligibility cannot be confirmed yet",
@@ -31,5 +43,10 @@ def run_ufac(user_data):
         assumptions=assumptions,
         unknowns=unknowns,
         risk_level=risk,
-        next_steps=next_steps
+        next_steps=next_steps,
+        fact_consensus=fact_consensus,
+        assumption_consensus=assumption_consensus,
+        unknown_consensus=unknown_consensus,
+        confidence_consensus=confidence_consensus,
+        decision_consensus=decision_consensus
     )

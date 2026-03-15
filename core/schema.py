@@ -13,3 +13,10 @@ class UFACResponse(BaseModel):
 
     risk_level: str  # LOW / MEDIUM / HIGH
     next_steps: List[str]
+
+    # Consensus scores for each agent
+    fact_consensus: float
+    assumption_consensus: float
+    unknown_consensus: float
+    confidence_consensus: float
+    decision_consensus: float
