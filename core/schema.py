@@ -1,3 +1,4 @@
+# File: core/schema.py
 # This prevents scope creep.
 # UFAC/core/schema.py
 from pydantic import BaseModel

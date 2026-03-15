@@ -1,3 +1,4 @@
+# File: core/ufac_engine.py
 from .fact_agent import extract_known_facts
 from .assumption_agent import detect_assumptions
 from .unknown_agent import detect_unknowns
