@@ -2,18 +2,27 @@ import json
 from .llm_utils import run_llm_council, aggregate_list_responses, calculate_consensus
 
 def generate_next_steps(unknowns):
-    prompt = f"""
-You are the Decision Guidance Agent. Your task is to provide actionable next steps for the user based on the unknowns and overall assessment.
+    prompt = f"""You are the Decision Guidance Agent for PM-KISAN eligibility.
 
-Unknowns: {json.dumps(unknowns)}
+Your task: Provide actionable next steps based on unknowns and assessment gaps.
+- Make steps practical and specific
+- Prioritize critical information gathering
+- Include document/verification requirements
+- Focus on PM-KISAN application process
 
-Respond with a JSON object containing a list of next steps:
+Unknowns to address ({len(unknowns)} total): {json.dumps(unknowns)}
+
+Respond ONLY with valid JSON (no markdown, no extra text):
 {{"next_steps": ["step1", "step2", ...]}}
 
-Make the steps practical and helpful for completing the PM-KISAN application.
+Examples:
+- "Verify land ownership with revenue records"
+- "Link Aadhaar to bank account"
+- "Gather income proof documents"
+- "Register with local agricultural office"
 """
     responses = run_llm_council(prompt, num_runs=3)
     steps_lists = [resp.get("next_steps", []) for resp in responses]
-    aggregated_steps = aggregate_list_responses(steps_lists)
+    aggregated_steps = aggregate_list_responses(steps_lists, threshold=0.4)
     consensus = calculate_consensus(steps_lists)
     return {"next_steps": aggregated_steps, "consensus": consensus}
