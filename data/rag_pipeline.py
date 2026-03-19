@@ -18,44 +18,79 @@ CHROMA_DIR = os.path.join(DATA_DIR, "chroma_db")
 _retriever_cache: Optional[object] = None
 _embeddings_cache: Optional[SentenceTransformerEmbeddings] = None
 
+
+class RAGError(Exception):
+    """Base exception for RAG-related errors."""
+    pass
+
+
+class RAGInitializationError(RAGError):
+    """Raised when RAG initialization fails."""
+    pass
+
+
+class RAGRetrievalError(RAGError):
+    """Raised when document retrieval fails."""
+    pass
+
 def _get_embeddings() -> SentenceTransformerEmbeddings:
-    """Get or create embeddings model (cached)."""
+    """Get or create embeddings model (cached) with error handling."""
     global _embeddings_cache
     if _embeddings_cache is None:
-        logger.info("Loading SentenceTransformer embeddings...")
-        _embeddings_cache = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-        logger.info("✅ Embeddings model loaded")
+        try:
+            logger.info("Loading SentenceTransformer embeddings model...")
+            _embeddings_cache = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+            logger.info("✅ Embeddings model loaded successfully")
+        except Exception as e:
+            error_msg = f"Failed to load embeddings model: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RAGInitializationError(error_msg) from e
     return _embeddings_cache
 
 def build_vectorstore() -> None:
-    """Build ChromaDB vectorstore from PDFs in data/ directory."""
+    """Build ChromaDB vectorstore from PDFs in data/ directory with error handling."""
     logger.info("🔨 Building vectorstore from PDFs...")
     
     if not os.path.exists(DATA_DIR):
-        logger.error(f"Data directory not found: {DATA_DIR}")
-        return
+        error_msg = f"Data directory not found: {DATA_DIR}"
+        logger.error(error_msg)
+        raise RAGInitializationError(error_msg)
     
     # Check if PDFs exist
     pdf_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.pdf')]
     if not pdf_files:
-        logger.warning(f"⚠️  No PDF files found in {DATA_DIR}")
+        warning_msg = f"⚠️  No PDF files found in {DATA_DIR}"
+        logger.warning(warning_msg)
         logger.info("Please add PM-KISAN guideline PDFs to the data/ directory")
-        return
+        raise RAGInitializationError(warning_msg)
     
     logger.info(f"Found {len(pdf_files)} PDF files: {pdf_files}")
     
     try:
         # Load PDFs
+        logger.info("Loading PDFs...")
         loader = PyPDFDirectoryLoader(DATA_DIR)
         docs = loader.load()
-        logger.info(f"Loaded {len(docs)} pages from PDFs")
+        logger.info(f"✅ Loaded {len(docs)} pages from PDFs")
+        
+        if not docs:
+            error_msg = "No documents loaded from PDFs"
+            logger.error(error_msg)
+            raise RAGInitializationError(error_msg)
         
         # Split into chunks
+        logger.info("Splitting documents into chunks...")
         splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         chunks = splitter.split_documents(docs)
-        logger.info(f"Split into {len(chunks)} chunks")
+        logger.info(f"✅ Split into {len(chunks)} chunks")
+        
+        if not chunks:
+            error_msg = "No chunks created from documents"
+            logger.error(error_msg)
+            raise RAGInitializationError(error_msg)
         
         # Create vectorstore
+        logger.info("Creating vectorstore...")
         embeddings = _get_embeddings()
         db = Chroma.from_documents(
             chunks,
@@ -65,9 +100,12 @@ def build_vectorstore() -> None:
         db.persist()
         logger.info(f"✅ Indexed {len(chunks)} chunks into ChromaDB at {CHROMA_DIR}")
         
-    except Exception as e:
-        logger.error(f"❌ Failed to build vectorstore: {e}")
+    except RAGInitializationError:
         raise
+    except Exception as e:
+        error_msg = f"Failed to build vectorstore: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise RAGInitializationError(error_msg) from e
 
 def get_retriever(force_rebuild: bool = False):
     """
@@ -78,6 +116,9 @@ def get_retriever(force_rebuild: bool = False):
     
     Returns:
         Chroma retriever object
+        
+    Raises:
+        RAGInitializationError: If retriever cannot be initialized
     """
     global _retriever_cache
     
@@ -110,8 +151,9 @@ def get_retriever(force_rebuild: bool = False):
         logger.info("✅ Retriever loaded and cached")
         return _retriever_cache
     except Exception as e:
-        logger.error(f"❌ Failed to load retriever: {e}")
-        raise
+        error_msg = f"Failed to load retriever from ChromaDB: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise RAGInitializationError(error_msg) from e
 
 def clear_cache() -> None:
     """Clear the retriever cache (useful for testing)."""

@@ -1,33 +1,43 @@
 # File: api/app.py
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from core.llm_utils import init_gemini
-from core.ufac_engine import run_ufac
+from core.llm_utils import init_gemini, LLMInitializationError, LLMError
+from core.ufac_engine import run_ufac, UFACError
 from core.schema import UFACResponse
-from data.rag_pipeline import get_retriever, get_vectorstore_status
+from data.rag_pipeline import get_retriever, get_vectorstore_status, RAGError
 
-logging.basicConfig(level=logging.INFO)
+# Configure structured logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: Initialize Groq API and RAG pipeline. Shutdown: cleanup."""
-    logger.info("="*60)
+    logger.info("="*70)
     logger.info("🚀 Starting UFAC Engine v2.0...")
-    logger.info("="*60)
+    logger.info("="*70)
     
     # Initialize Groq API
     try:
         init_gemini()
-        logger.info("✅ Groq API initialized")
+        logger.info("✅ Groq API initialized successfully")
+    except LLMInitializationError as e:
+        logger.error(f"❌ Failed to initialize Groq API: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"❌ Failed to initialize Groq API: {e}")
+        logger.error(f"❌ Unexpected error during Groq initialization: {str(e)}", exc_info=True)
         raise
     
     # Initialize RAG pipeline
@@ -45,14 +55,18 @@ async def lifespan(app: FastAPI):
             logger.info(f"✅ RAG pipeline ready: {status['collection_count']} chunks indexed")
             rag_status["initialized"] = True
             
+    except RAGError as e:
+        logger.warning(f"⚠️  RAG pipeline initialization failed: {str(e)}")
+        logger.info("Continuing without RAG (using hardcoded rules)")
+        rag_status["error"] = str(e)
     except Exception as e:
-        logger.error(f"⚠️  RAG pipeline initialization failed: {e}")
+        logger.warning(f"⚠️  Unexpected error during RAG initialization: {str(e)}", exc_info=True)
         logger.info("Continuing without RAG (using hardcoded rules)")
         rag_status["error"] = str(e)
     
-    logger.info("="*60)
+    logger.info("="*70)
     logger.info("✅ UFAC Engine ready for requests")
-    logger.info("="*60)
+    logger.info("="*70)
     
     # Store RAG status in app state for health checks
     app.state.rag_status = rag_status
@@ -60,6 +74,7 @@ async def lifespan(app: FastAPI):
     yield
     
     logger.info("🛑 UFAC Engine shutting down...")
+
 
 app = FastAPI(
     title="UFAC Engine API",
@@ -75,6 +90,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Request/Response logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all HTTP requests and responses."""
+    start_time = time.time()
+    request_id = request.headers.get("x-request-id", "unknown")
+    
+    logger.info(f"[{request_id}] {request.method} {request.url.path}")
+    
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        logger.info(f"[{request_id}] {response.status_code} - {process_time:.3f}s")
+        return response
+    except Exception as e:
+        process_time = time.time() - start_time
+        logger.error(f"[{request_id}] Request failed after {process_time:.3f}s: {str(e)}", exc_info=True)
+        raise
+
 
 class EligibilityCheckRequest(BaseModel):
     occupation: Optional[str] = None
@@ -92,6 +128,7 @@ class EligibilityCheckRequest(BaseModel):
     district: Optional[str] = None
     additional_info: Optional[dict] = None
 
+
 @app.get("/health")
 async def health_check():
     """Health check with RAG status."""
@@ -102,15 +139,21 @@ async def health_check():
         "rag": rag_status
     }
 
+
 @app.get("/rag-status")
-async def rag_status():
+async def rag_status_endpoint():
     """Check RAG pipeline status."""
     try:
         status = get_vectorstore_status()
+        logger.info(f"RAG status check: {status}")
         return {"status": "ok", "rag": status}
-    except Exception as e:
-        logger.error(f"RAG status check failed: {e}")
+    except RAGError as e:
+        logger.error(f"RAG status check failed: {str(e)}")
         return {"status": "error", "error": str(e)}
+    except Exception as e:
+        logger.error(f"Unexpected error in RAG status check: {str(e)}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
 
 @app.post("/check", response_model=UFACResponse)
 async def check_eligibility(request: EligibilityCheckRequest):
@@ -120,12 +163,31 @@ async def check_eligibility(request: EligibilityCheckRequest):
     """
     try:
         user_data = request.model_dump(exclude_none=True)
-        logger.info(f"Processing eligibility check: {user_data}")
+        logger.info(f"Processing eligibility check with fields: {list(user_data.keys())}")
+        
         result = await run_ufac(user_data)
+        logger.info(f"Eligibility check completed: confidence={result.confidence}, risk={result.risk_level}")
         return result
+        
+    except UFACError as e:
+        logger.error(f"UFAC assessment failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Assessment failed: {str(e)}"
+        )
+    except LLMError as e:
+        logger.error(f"LLM error during assessment: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"LLM service error: {str(e)}"
+        )
     except Exception as e:
-        logger.error(f"Eligibility check failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+        logger.error(f"Unexpected error during eligibility check: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error: {str(e)}"
+        )
+
 
 @app.get("/")
 async def root():
@@ -134,6 +196,7 @@ async def root():
         "endpoints": {
             "health": "GET /health",
             "check": "POST /check",
+            "rag_status": "GET /rag-status",
             "docs": "GET /docs",
         },
     }
