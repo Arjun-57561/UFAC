@@ -1,10 +1,13 @@
 # File: api/app.py
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.llm_utils import init_gemini
@@ -36,6 +39,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve the UI static files
+ui_dir = os.path.join(os.path.dirname(__file__), "..", "ui")
+if os.path.isdir(ui_dir):
+    app.mount("/ui", StaticFiles(directory=ui_dir), name="ui")
 
 class EligibilityCheckRequest(BaseModel):
     occupation: Optional[str] = None
@@ -74,12 +82,16 @@ async def check_eligibility(request: EligibilityCheckRequest):
 
 @app.get("/")
 async def root():
+    ui_path = os.path.join(os.path.dirname(__file__), "..", "ui", "index.html")
+    if os.path.isfile(ui_path):
+        return FileResponse(ui_path, media_type="text/html")
     return {
         "service": "UFAC Engine — PM-KISAN Eligibility Assessment v2",
         "endpoints": {
             "health": "GET /health",
             "check": "POST /check",
             "docs": "GET /docs",
+            "ui": "GET /ui/index.html",
         },
     }
 

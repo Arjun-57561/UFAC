@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UFAC — PM-KISAN Eligibility Checker</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f0f4f8;
+      color: #2d3748;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    header h1 {
+      font-size: 2rem;
+      color: #276749;
+    }
+    header p {
+      margin-top: 6px;
+      color: #718096;
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      padding: 28px 32px;
+      max-width: 680px;
+      margin: 0 auto 24px;
+    }
+
+    h2 {
+      font-size: 1.1rem;
+      color: #276749;
+      margin-bottom: 18px;
+      border-bottom: 2px solid #c6f6d5;
+      padding-bottom: 8px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 520px) {
+      .form-grid { grid-template-columns: 1fr; }
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .field.full-width { grid-column: 1 / -1; }
+
+    label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #4a5568;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select {
+      border: 1px solid #cbd5e0;
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 0.9rem;
+      color: #2d3748;
+      background: #f7fafc;
+      transition: border-color 0.2s;
+      width: 100%;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #48bb78;
+      background: #fff;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .checkbox-row input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #276749;
+      cursor: pointer;
+    }
+    .checkbox-row label {
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    .btn-submit {
+      display: block;
+      width: 100%;
+      margin-top: 24px;
+      padding: 12px;
+      background: #276749;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-submit:hover { background: #2f855a; }
+    .btn-submit:disabled { background: #a0aec0; cursor: not-allowed; }
+
+    #loading {
+      display: none;
+      text-align: center;
+      color: #718096;
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+    #loading::after {
+      content: '';
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #276749;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-left: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #error-box {
+      display: none;
+      background: #fff5f5;
+      border: 1px solid #fc8181;
+      border-radius: 8px;
+      padding: 14px 18px;
+      color: #c53030;
+      font-size: 0.9rem;
+      margin-top: 16px;
+    }
+
+    /* Result card */
+    #result-card { display: none; }
+
+    .answer-banner {
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+    .answer-banner.eligible   { background: #c6f6d5; color: #22543d; }
+    .answer-banner.ineligible { background: #fed7d7; color: #742a2a; }
+    .answer-banner.uncertain  { background: #fefcbf; color: #744210; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 480px) {
+      .metrics { grid-template-columns: 1fr 1fr; }
+    }
+    .metric-box {
+      background: #f7fafc;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    .metric-box .label {
+      font-size: 0.75rem;
+      color: #718096;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .metric-box .value {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #276749;
+    }
+    .risk-LOW    { color: #276749; }
+    .risk-MEDIUM { color: #c05621; }
+    .risk-HIGH   { color: #c53030; }
+
+    .section-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #718096;
+      margin: 16px 0 8px;
+    }
+
+    ul.tag-list {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    ul.tag-list li {
+      background: #ebf8ff;
+      color: #2b6cb0;
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-size: 0.82rem;
+    }
+    ul.tag-list.assumptions li { background: #fffff0; color: #744210; }
+    ul.tag-list.unknowns li    { background: #fff5f5; color: #9b2c2c; }
+    ul.tag-list.steps li       { background: #f0fff4; color: #22543d; }
+    ul.tag-list li:empty { display: none; }
+
+    .empty-hint {
+      font-size: 0.85rem;
+      color: #a0aec0;
+      font-style: italic;
+    }
+
+    .consensus-bar-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .consensus-bar-label {
+      font-size: 0.8rem;
+      color: #718096;
+      width: 130px;
+      flex-shrink: 0;
+    }
+    .consensus-bar-bg {
+      flex: 1;
+      background: #e2e8f0;
+      border-radius: 999px;
+      height: 8px;
+      overflow: hidden;
+    }
+    .consensus-bar-fill {
+      height: 100%;
+      background: #48bb78;
+      border-radius: 999px;
+      transition: width 0.8s ease;
+    }
+    .consensus-bar-pct {
+      font-size: 0.8rem;
+      color: #4a5568;
+      width: 36px;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🌾 PM-KISAN Eligibility Checker</h1>
+  <p>Powered by the UFAC (Unknown–Fact–Assumption–Confidence) Engine</p>
+</header>
+
+<!-- Input Form -->
+<div class="card">
+  <h2>Enter Your Details</h2>
+  <form id="eligibility-form">
+
+    <div class="form-grid">
+
+      <div class="field">
+        <label for="occupation">Occupation</label>
+        <select id="occupation" name="occupation">
+          <option value="">— Select —</option>
+          <option value="farmer">Farmer</option>
+          <option value="agricultural_labourer">Agricultural Labourer</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="land_ownership">Land Ownership</label>
+        <select id="land_ownership" name="land_ownership">
+          <option value="">— Select —</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="state">State / UT</label>
+        <input type="text" id="state" name="state" placeholder="e.g. Punjab" />
+      </div>
+
+      <div class="field">
+        <label for="district">District</label>
+        <input type="text" id="district" name="district" placeholder="e.g. Ludhiana" />
+      </div>
+
+      <div class="field">
+        <label for="annual_income">Annual Income (₹)</label>
+        <input type="number" id="annual_income" name="annual_income" min="0" placeholder="e.g. 150000" />
+      </div>
+
+      <!-- Checkboxes -->
+      <div class="field">
+        <label>Aadhaar &amp; Bank</label>
+        <div class="checkbox-row">
+          <input type="checkbox" id="aadhaar_linked" name="aadhaar_linked" />
+          <label for="aadhaar_linked">Aadhaar Linked to Bank</label>
+        </div>
+        <div class="checkbox-row" style="margin-top:6px">
+          <input type="checkbox" id="aadhaar_ekyc_done" name="aadhaar_ekyc_done" />
+          <label for="aadhaar_ekyc_done">e-KYC Completed</label>
+        </div>
+        <div class="checkbox-row" style="margin-top:6px">
+          <input type="checkbox" id="bank_account" name="bank_account" />
+          <label for="bank_account">Bank Account Exists</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Disqualifiers</label>
+        <div class="checkbox-row">
+          <input type="checkbox" id="income_tax_payer" name="income_tax_payer" />
+          <label for="income_tax_payer">Income Tax Payer</label>
+        </div>
+        <div class="checkbox-row" style="margin-top:6px">
+          <input type="checkbox" id="govt_employee" name="govt_employee" />
+          <label for="govt_employee">Government Employee</label>
+        </div>
+        <div class="checkbox-row" style="margin-top:6px">
+          <input type="checkbox" id="pension_above_10k" name="pension_above_10k" />
+          <label for="pension_above_10k">Pension &gt; ₹10,000 / month</label>
+        </div>
+        <div class="checkbox-row" style="margin-top:6px">
+          <input type="checkbox" id="practicing_professional" name="practicing_professional" />
+          <label for="practicing_professional">Practicing Professional</label>
+        </div>
+      </div>
+
+    </div>
+
+    <button type="submit" class="btn-submit" id="submit-btn">Check Eligibility</button>
+  </form>
+
+  <div id="loading">Analyzing your information, please wait…</div>
+  <div id="error-box"></div>
+</div>
+
+<!-- Result Card -->
+<div class="card" id="result-card">
+  <h2>Assessment Result</h2>
+
+  <div id="answer-banner" class="answer-banner uncertain"></div>
+
+  <div class="metrics" id="metrics-grid"></div>
+
+  <div class="section-title">Known Facts</div>
+  <ul class="tag-list" id="facts-list"></ul>
+
+  <div class="section-title">Assumptions Made</div>
+  <ul class="tag-list assumptions" id="assumptions-list"></ul>
+
+  <div class="section-title">Missing / Unknown Information</div>
+  <ul class="tag-list unknowns" id="unknowns-list"></ul>
+
+  <div class="section-title">Recommended Next Steps</div>
+  <ul class="tag-list steps" id="steps-list"></ul>
+
+  <div class="section-title">Agent Consensus Scores</div>
+  <div id="consensus-bars"></div>
+</div>
+
+<script>
+  const form = document.getElementById('eligibility-form');
+  const submitBtn = document.getElementById('submit-btn');
+  const loading = document.getElementById('loading');
+  const errorBox = document.getElementById('error-box');
+  const resultCard = document.getElementById('result-card');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    // Hide previous results / errors
+    resultCard.style.display = 'none';
+    errorBox.style.display = 'none';
+    loading.style.display = 'block';
+    submitBtn.disabled = true;
+
+    // Build payload — only include non-empty values
+    const payload = {};
+
+    const textFields = ['occupation', 'land_ownership', 'state', 'district'];
+    textFields.forEach(f => {
+      const val = document.getElementById(f).value.trim();
+      if (val) payload[f] = val;
+    });
+
+    const numFields = ['annual_income'];
+    numFields.forEach(f => {
+      const val = document.getElementById(f).value;
+      if (val !== '') payload[f] = parseInt(val, 10);
+    });
+
+    const boolFields = [
+      'aadhaar_linked', 'aadhaar_ekyc_done', 'bank_account',
+      'income_tax_payer', 'govt_employee', 'pension_above_10k',
+      'practicing_professional'
+    ];
+    boolFields.forEach(f => {
+      if (document.getElementById(f).checked) payload[f] = true;
+    });
+
+    try {
+      const res = await fetch('/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server error ${res.status}`);
+      }
+
+      const data = await res.json();
+      renderResult(data);
+      resultCard.style.display = 'block';
+      resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    } catch (err) {
+      errorBox.textContent = `❌ ${err.message}`;
+      errorBox.style.display = 'block';
+    } finally {
+      loading.style.display = 'none';
+      submitBtn.disabled = false;
+    }
+  });
+
+  function answerBannerClass(answer) {
+    const ans = answer.toLowerCase();
+    if (ans.includes('ineligible')) return 'ineligible';
+    if (ans.includes('eligible') && !ans.includes('cannot')) return 'eligible';
+    return 'uncertain';
+  }
+
+  function renderResult(data) {
+    // Answer banner
+    const banner = document.getElementById('answer-banner');
+    banner.textContent = data.answer;
+    banner.className = 'answer-banner ' + answerBannerClass(data.answer);
+
+    // Metrics
+    const riskClass = 'risk-' + data.risk_level;
+    document.getElementById('metrics-grid').innerHTML = `
+      <div class="metric-box">
+        <div class="label">Confidence</div>
+        <div class="value">${data.confidence}<span style="font-size:0.8rem;color:#718096">%</span></div>
+      </div>
+      <div class="metric-box">
+        <div class="label">Risk Level</div>
+        <div class="value ${riskClass}">${data.risk_level}</div>
+      </div>
+      <div class="metric-box">
+        <div class="label">Unknowns</div>
+        <div class="value">${data.unknowns.length}</div>
+      </div>
+    `;
+
+    // Tag lists
+    renderTags('facts-list', data.known_facts);
+    renderTags('assumptions-list', data.assumptions);
+    renderTags('unknowns-list', data.unknowns);
+    renderTags('steps-list', data.next_steps);
+
+    // Consensus bars
+    const consensusFields = [
+      { label: 'Fact Agent',        key: 'fact_consensus' },
+      { label: 'Assumption Agent',  key: 'assumption_consensus' },
+      { label: 'Unknown Agent',     key: 'unknown_consensus' },
+      { label: 'Confidence Agent',  key: 'confidence_consensus' },
+      { label: 'Decision Agent',    key: 'decision_consensus' },
+    ];
+    const barsDiv = document.getElementById('consensus-bars');
+    barsDiv.innerHTML = consensusFields.map(f => {
+      const pct = Math.round((data[f.key] || 0) * 100);
+      return `
+        <div class="consensus-bar-wrapper">
+          <span class="consensus-bar-label">${f.label}</span>
+          <div class="consensus-bar-bg">
+            <div class="consensus-bar-fill" style="width:${pct}%"></div>
+          </div>
+          <span class="consensus-bar-pct">${pct}%</span>
+        </div>`;
+    }).join('');
+  }
+
+  function renderTags(listId, items) {
+    const ul = document.getElementById(listId);
+    if (!items || items.length === 0) {
+      ul.innerHTML = '<span class="empty-hint">None</span>';
+      return;
+    }
+    ul.innerHTML = items.map(i => `<li>${escapeHtml(i)}</li>`).join('');
+  }
+
+  const _escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+  function escapeHtml(str) {
+    return str.replace(/[&<>"']/g, ch => _escapeMap[ch]);
+  }
+</script>
+</body>
+</html>
