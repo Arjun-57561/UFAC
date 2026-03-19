@@ -1,82 +1,93 @@
 # File: core/llm_utils.py
 import os
-import google.generativeai as genai
-from typing import List, Dict, Any
+import asyncio
 import json
+import logging
+from typing import List, Dict, Any
 
-# Set your Gemini API key
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable not set")
-genai.configure(api_key=GEMINI_API_KEY)
+import google.generativeai as genai
 
-def run_llm_council(prompt: str, num_runs: int = 3) -> List[Dict[str, Any]]:
-    """Run the Gemini LLM multiple times and collect responses."""
-    responses = []
+logger = logging.getLogger(__name__)
+
+GEMINI_API_KEY: str | None = None  # Initialized via lifespan
+
+def init_gemini():
+    global GEMINI_API_KEY
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise ValueError("GEMINI_API_KEY environment variable not set")
+    GEMINI_API_KEY = key
+    genai.configure(api_key=GEMINI_API_KEY)
+    logger.info("Gemini API initialized successfully.")
+
+async def _single_llm_call(prompt: str, temperature: float, run_index: int) -> Dict[str, Any]:
+    """Single async Gemini call with timeout and retry."""
     model = genai.GenerativeModel("gemini-1.5-flash")
-    
-    for i in range(num_runs):
+    loop = asyncio.get_event_loop()
+
+    def _call():
+        return model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=temperature,
+                max_output_tokens=500,
+                top_p=0.95,
+            ),
+        )
+
+    for attempt in range(2):  # 1 retry on failure
         try:
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.7 + (i * 0.1),  # Vary temperature for diversity
-                    max_output_tokens=500,
-                    top_p=0.95,
-                )
+            response = await asyncio.wait_for(
+                loop.run_in_executor(None, _call),
+                timeout=15.0,
             )
-            content = response.text.strip()
-            # Extract JSON from response
-            parsed = extract_json_from_response(content)
-            responses.append(parsed)
+            return extract_json_from_response(response.text.strip())
+        except asyncio.TimeoutError:
+            logger.warning(f"Run {run_index+1} attempt {attempt+1} timed out.")
         except Exception as e:
-            print(f"Error in Gemini call (run {i+1}): {e}")
-            responses.append({})  # Empty on error
-    return responses
+            logger.error(f"Run {run_index+1} attempt {attempt+1} error: {e}")
+    return {}
+
+async def run_llm_council(prompt: str, num_runs: int = 3) -> List[Dict[str, Any]]:
+    """Run Gemini LLM concurrently num_runs times for diversity and consensus."""
+    tasks = [
+        _single_llm_call(prompt, temperature=0.7 + (i * 0.1), run_index=i)
+        for i in range(num_runs)
+    ]
+    return await asyncio.gather(*tasks)
 
 def extract_json_from_response(text: str) -> Dict[str, Any]:
-    """Extract JSON from LLM response, handling markdown code blocks."""
     try:
-        # Try direct JSON parsing first
         return json.loads(text)
     except json.JSONDecodeError:
-        # Try extracting from markdown code block
-        if "```json" in text:
-            start = text.find("```json") + 7
-            end = text.find("```", start)
-            if end > start:
-                return json.loads(text[start:end].strip())
-        elif "```" in text:
-            start = text.find("```") + 3
-            end = text.find("```", start)
-            if end > start:
-                return json.loads(text[start:end].strip())
-        # If all else fails, return empty dict
+        for marker in ["```json", "```"]:
+            if marker in text:
+                start = text.find(marker) + len(marker)
+                end = text.find("```", start)
+                if end > start:
+                    try:
+                        return json.loads(text[start:end].strip())
+                    except json.JSONDecodeError:
+                        pass
+        logger.warning("Could not parse JSON from LLM response.")
         return {}
 
-def aggregate_list_responses(responses: List[List[str]], threshold: float = 0.5) -> List[str]:
-    """Aggregate list responses by majority vote."""
+def aggregate_list_responses(responses: List[List[str]], threshold: float = 0.4) -> List[str]:
     if not responses:
         return []
-    all_items = {}
+    all_items: Dict[str, int] = {}
     total_runs = len(responses)
     for resp in responses:
         for item in resp:
             all_items[item] = all_items.get(item, 0) + 1
-    aggregated = [item for item, count in all_items.items() if count / total_runs >= threshold]
-    return aggregated
+    return [item for item, count in all_items.items() if count / total_runs >= threshold]
 
-def aggregate_score_responses(responses: List[float]) -> float:
-    """Average the scores."""
-    if not responses:
-        return 0.0
-    return sum(responses) / len(responses)
+def aggregate_score_responses(scores: List[float]) -> float:
+    return sum(scores) / len(scores) if scores else 0.0
 
 def calculate_consensus(responses: List[Any]) -> float:
-    """Simple consensus score: fraction of identical responses."""
     if not responses:
         return 0.0
     from collections import Counter
     counts = Counter(str(r) for r in responses)
-    max_count = max(counts.values())
-    return max_count / len(responses)
+    return max(counts.values()) / len(responses)

@@ -1,23 +1,34 @@
 # File: api/app.py
+import logging
+from contextlib import asynccontextmanager
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+
+from core.llm_utils import init_gemini
 from core.ufac_engine import run_ufac
 from core.schema import UFACResponse
-import logging
 
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: validate env and initialize Gemini. Shutdown: cleanup."""
+    logger.info("Starting UFAC Engine — initializing Gemini...")
+    init_gemini()  # Fails fast at startup if API key missing
+    yield
+    logger.info("UFAC Engine shutting down.")
 
 app = FastAPI(
     title="UFAC Engine API",
     description="Unknown-Fact-Assumption-Confidence engine for PM-KISAN eligibility",
-    version="1.0.0"
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,54 +38,48 @@ app.add_middleware(
 )
 
 class EligibilityCheckRequest(BaseModel):
-    """Request model for eligibility check"""
     occupation: Optional[str] = None
     land_ownership: Optional[str] = None
     aadhaar_linked: Optional[bool] = None
+    aadhaar_ekyc_done: Optional[bool] = None
     bank_account: Optional[bool] = None
     annual_income: Optional[float] = None
+    income_tax_payer: Optional[bool] = None
+    govt_employee: Optional[bool] = None
+    pension_above_10k: Optional[bool] = None
+    practicing_professional: Optional[bool] = None
+    constitutional_post_holder: Optional[bool] = None
     state: Optional[str] = None
     district: Optional[str] = None
     additional_info: Optional[dict] = None
 
 @app.get("/health")
-def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "service": "UFAC Engine"}
+async def health_check():
+    return {"status": "healthy", "service": "UFAC Engine v2"}
 
 @app.post("/check", response_model=UFACResponse)
-def check_eligibility(request: EligibilityCheckRequest):
+async def check_eligibility(request: EligibilityCheckRequest):
     """
-    Check PM-KISAN eligibility based on provided information.
-    
-    Returns:
-    - answer: Eligibility status
-    - confidence: Confidence score (0-100)
-    - known_facts: Extracted facts
-    - assumptions: Identified assumptions
-    - unknowns: Missing information
-    - risk_level: Assessment risk level
-    - next_steps: Recommended actions
-    - consensus scores for each agent
+    Check PM-KISAN eligibility.
+    Runs all 5 agents with parallel async execution for low latency.
     """
     try:
         user_data = request.model_dump(exclude_none=True)
-        logger.info(f"Processing eligibility check for: {user_data}")
-        result = run_ufac(user_data)
+        logger.info(f"Processing eligibility check: {user_data}")
+        result = await run_ufac(user_data)
         return result
     except Exception as e:
-        logger.error(f"Error in eligibility check: {str(e)}")
+        logger.error(f"Eligibility check failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
 
 @app.get("/")
-def root():
-    """API documentation"""
+async def root():
     return {
-        "service": "UFAC Engine - PM-KISAN Eligibility Assessment",
+        "service": "UFAC Engine — PM-KISAN Eligibility Assessment v2",
         "endpoints": {
-            "health": "/health",
-            "check": "/check (POST)",
-            "docs": "/docs"
-        }
+            "health": "GET /health",
+            "check": "POST /check",
+            "docs": "GET /docs",
+        },
     }
 
