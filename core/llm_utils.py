@@ -13,7 +13,8 @@ load_dotenv()  # Loads .env file automatically
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-1.5-flash-8b"  # Free tier: 1500 req/day vs 500 for 2.0-flash
+
 _client: genai.Client | None = None  # Singleton client
 
 
