@@ -1,41 +1,50 @@
+# File: core/llm_utils.py
 import os
 import asyncio
 import json
 import logging
 from typing import List, Dict, Any
-from groq import Groq
-from dotenv import load_dotenv
 
-load_dotenv()
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
+
+load_dotenv()  # Loads .env file automatically
+
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "llama-3.3-70b-versatile"
-_client: Groq | None = None
+MODEL_NAME = "gemini-1.5-flash-8b"  # Free tier: 1500 req/day vs 500 for 2.0-flash
+
+_client: genai.Client | None = None  # Singleton client
 
 
-def init_gemini():  # Keep name for compatibility
+def init_gemini():
     global _client
-    key = os.getenv("GROQ_API_KEY")
+    key = os.getenv("GEMINI_API_KEY")
     if not key:
-        raise ValueError("GROQ_API_KEY environment variable not set")
-    _client = Groq(api_key=key)
-    logger.info("Groq API initialized successfully.")
+        raise ValueError("GEMINI_API_KEY environment variable not set")
+    _client = genai.Client(api_key=key)
+    logger.info("Gemini API initialized successfully.")
 
 
 async def _single_llm_call(prompt: str, temperature: float, run_index: int) -> Dict[str, Any]:
+    """Single async Gemini call with timeout and retry."""
     if _client is None:
-        raise RuntimeError("Groq client not initialized. Call init_gemini() first.")
+        raise RuntimeError("Gemini client not initialized. Call init_gemini() first.")
 
     def _call():
-        response = _client.chat.completions.create(
+        response = _client.models.generate_content(
             model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=min(temperature, 1.0),  # Groq max temp is 1.0
-            max_tokens=500,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=temperature,
+                max_output_tokens=500,
+                top_p=0.95,
+            ),
         )
-        return response.choices[0].message.content.strip()
+        return response.text.strip()
 
-    loop = asyncio.get_running_loop()
+    loop = asyncio.get_running_loop()  # ✅ correct for Python 3.10+
 
     for attempt in range(2):
         try:
@@ -46,13 +55,13 @@ async def _single_llm_call(prompt: str, temperature: float, run_index: int) -> D
             return extract_json_from_response(text)
         except (asyncio.TimeoutError, Exception) as e:
             logger.warning(f"Run {run_index+1} attempt {attempt+1} failed: {e}")
-            await asyncio.sleep(0.5 * (attempt + 1))
+            await asyncio.sleep(0.5 * (attempt + 1))  # backoff before retry
 
     return {}
 
 
-# All functions below stay exactly the same as before
 async def run_llm_council(prompt: str, num_runs: int = 3) -> List[Dict[str, Any]]:
+    """Run Gemini LLM concurrently num_runs times for diversity and consensus."""
     tasks = [
         _single_llm_call(prompt, temperature=0.7 + (i * 0.1), run_index=i)
         for i in range(num_runs)
@@ -96,6 +105,7 @@ def calculate_consensus(responses: List[Any]) -> float:
     if not responses:
         return 0.0
     from collections import Counter
+    # Filter out empty responses before scoring consensus
     non_empty = [r for r in responses if r]
     if not non_empty:
         return 0.0
