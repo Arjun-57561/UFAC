@@ -13,13 +13,22 @@ MODEL_NAME = "llama-3.3-70b-versatile"
 _client: Groq | None = None
 
 
-def init_gemini():  # Keep name for compatibility
+def init_groq():
     global _client
     key = os.getenv("GROQ_API_KEY")
     if not key:
         raise ValueError("GROQ_API_KEY environment variable not set")
     _client = Groq(api_key=key)
     logger.info("Groq API initialized successfully.")
+
+
+def init_gemini():
+    """Deprecated: use init_groq() instead."""
+    logger.warning(
+        "init_gemini() is deprecated and will be removed in a future release. "
+        "Use init_groq() instead."
+    )
+    init_groq()
 
 
 async def _single_llm_call(prompt: str, temperature: float, run_index: int) -> Dict[str, Any]:

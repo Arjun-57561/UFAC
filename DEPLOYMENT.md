@@ -8,7 +8,7 @@ git clone <repo>
 cd UFAC
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env with your Gemini API key
+# Edit .env with your Groq API key
 ```
 
 ### 2. Run CLI
@@ -46,7 +46,7 @@ CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]
 Build and run:
 ```bash
 docker build -t ufac-engine .
-docker run -e GEMINI_API_KEY=your_key -p 8000:8000 ufac-engine
+docker run -e GROQ_API_KEY=your_key -p 8000:8000 ufac-engine
 ```
 
 ### Option 2: Heroku
@@ -59,7 +59,7 @@ web: uvicorn api.app:app --host 0.0.0.0 --port $PORT
 Deploy:
 ```bash
 heroku create ufac-engine
-heroku config:set GEMINI_API_KEY=your_key
+heroku config:set GROQ_API_KEY=your_key
 git push heroku main
 ```
 
@@ -82,13 +82,13 @@ gcloud run deploy ufac-engine \
   --source . \
   --platform managed \
   --region us-central1 \
-  --set-env-vars GEMINI_API_KEY=your_key
+  --set-env-vars GROQ_API_KEY=your_key
 ```
 
 ### Option 5: DigitalOcean App Platform
 
 1. Connect GitHub repo
-2. Set environment variable: `GEMINI_API_KEY`
+2. Set environment variable: `GROQ_API_KEY`
 3. Set run command: `uvicorn api.app:app --host 0.0.0.0 --port 8080`
 4. Deploy
 
@@ -97,7 +97,7 @@ gcloud run deploy ufac-engine \
 ## Environment Variables
 
 ### Required
-- `GEMINI_API_KEY`: Your Google Gemini API key
+- `GROQ_API_KEY`: Your Groq API key
 
 ### Optional
 - `API_HOST`: Server host (default: 0.0.0.0)
@@ -139,7 +139,7 @@ def run_llm_council(prompt: str, num_runs: int = 2):  # Reduce from 3 to 2
 
 ### For Cost Optimization
 
-1. **Use Gemini 1.5 Flash** (already configured - fastest & cheapest)
+1. **Use Groq LLaMA 3** (already configured — fast and cost-effective)
 2. **Batch Requests**: Process multiple assessments together
 3. **Cache Results**: Avoid duplicate assessments
 4. **Monitor Usage**: Track API calls and costs
@@ -251,7 +251,7 @@ git push
 # Redeploy
 
 # Or use Docker tags
-docker run -e GEMINI_API_KEY=key ufac-engine:v1.0.0
+docker run -e GROQ_API_KEY=key ufac-engine:v1.0.0
 ```
 
 ---
@@ -284,7 +284,7 @@ git push
 
 **API Key Error**
 ```
-Solution: Check GEMINI_API_KEY environment variable
+Solution: Check GROQ_API_KEY environment variable
 ```
 
 **Timeout Errors**
@@ -309,17 +309,17 @@ Solution: Reduce batch size, add more RAM, or use serverless
 ### Monthly Costs (Rough Estimates)
 
 **Low Volume** (100 assessments/day)
-- Gemini API: ~$5
+- Groq API: ~$5
 - Hosting: $10-20
 - Total: ~$15-25/month
 
 **Medium Volume** (1000 assessments/day)
-- Gemini API: ~$50
+- Groq API: ~$50
 - Hosting: $50-100
 - Total: ~$100-150/month
 
 **High Volume** (10000 assessments/day)
-- Gemini API: ~$500
+- Groq API: ~$500
 - Hosting: $200-500
 - Total: ~$700-1000/month
 

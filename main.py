@@ -3,7 +3,7 @@ import asyncio
 import json
 import time
 from core.ufac_engine import run_ufac
-from core.llm_utils import init_gemini
+from core.llm_utils import init_groq
 
 
 async def run_test(name: str, user_input: dict):
@@ -19,7 +19,7 @@ async def run_test(name: str, user_input: dict):
 
 
 async def main():
-    init_gemini()
+    init_groq()
 
     await run_test("TEST 1: Minimal Input (Farmer)", {
         "occupation": "farmer"
