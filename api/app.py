@@ -1,10 +1,12 @@
 # File: api/app.py
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.llm_utils import init_gemini
@@ -80,6 +82,13 @@ async def root():
             "health": "GET /health",
             "check": "POST /check",
             "docs": "GET /docs",
+            "ui": "GET /ui",
         },
     }
+
+# Serve the UI — must be mounted after all API routes so they take priority
+_UI_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ui")
+
+if os.path.isdir(_UI_DIR):
+    app.mount("/ui", StaticFiles(directory=_UI_DIR, html=True), name="ui")
 
