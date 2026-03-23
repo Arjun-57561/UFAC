@@ -10,6 +10,7 @@ Implements in-memory caching with TTL (Time-To-Live) for:
 Reduces redundant LLM calls and improves response times.
 """
 
+import os
 import hashlib
 import json
 import logging
@@ -71,7 +72,7 @@ class Cache:
             "total_requests": 0,
         }
     
-    def _generate_key(self, data: Dict[str, Any]) -> str:
+    def generate_key(self, data: Dict[str, Any]) -> str:
         """Generate cache key from data dictionary."""
         # Sort keys for consistent hashing
         sorted_data = json.dumps(data, sort_keys=True, default=str)
@@ -200,10 +201,10 @@ class Cache:
         return f"Cache(entries={len(self._cache)}, hits={self._stats['hits']}, misses={self._stats['misses']})"
 
 
-# Global cache instances
-_assessment_cache = Cache(default_ttl=3600)  # 1 hour for assessments
-_rag_cache = Cache(default_ttl=7200)  # 2 hours for RAG results
-_llm_cache = Cache(default_ttl=3600)  # 1 hour for LLM responses
+# Global cache instances with configurable TTL
+_assessment_cache = Cache(default_ttl=int(os.getenv("CACHE_TTL_ASSESSMENT", "3600")))  # 1 hour for assessments
+_rag_cache = Cache(default_ttl=int(os.getenv("CACHE_TTL_RAG", "7200")))  # 2 hours for RAG results
+_llm_cache = Cache(default_ttl=int(os.getenv("CACHE_TTL_LLM", "3600")))  # 1 hour for LLM responses
 
 
 def get_assessment_cache() -> Cache:

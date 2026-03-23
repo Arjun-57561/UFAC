@@ -1,6 +1,7 @@
 # File: core/ufac_engine.py
 import asyncio
 import logging
+import re
 from .fact_agent import extract_known_facts
 from .assumption_agent import detect_assumptions
 from .unknown_agent import detect_unknowns
@@ -15,6 +16,36 @@ logger = logging.getLogger(__name__)
 class UFACError(Exception):
     """Base exception for UFAC engine errors."""
     pass
+
+# Input Sanitization Constants
+ALLOWED_KEYS = {
+    "occupation", "land_ownership", "aadhaar_linked",
+    "aadhaar_ekyc_done", "bank_account", "annual_income",
+    "income_tax_payer", "govt_employee", "pension_above_10k",
+    "practicing_professional", "constitutional_post_holder",
+    "state", "district"
+}
+
+INJECTION_PATTERN = re.compile(
+    r'(ignore|forget|system|prompt|jailbreak|override)',
+    re.IGNORECASE
+)
+
+def sanitize_user_data(data: dict) -> dict:
+    """Sanitize user input to prevent injection attacks and validate data."""
+    sanitized = {}
+    for key, value in data.items():
+        if key not in ALLOWED_KEYS:
+            continue
+        if isinstance(value, str):
+            value = value.strip()[:MAX_STRING_LENGTH]
+            if INJECTION_PATTERN.search(value):
+                logger.warning(f"Potential injection in field {key}: {value}")
+                value = re.sub(INJECTION_PATTERN, "[redacted]", value)
+        if isinstance(value, float) and key == "annual_income":
+            value = max(0.0, min(value, MAX_INCOME_VALUE))
+        sanitized[key] = value
+    return sanitized
 
 def _determine_answer(confidence: int, unknowns: list, known_facts: list) -> str:
     unknown_lower = " ".join(unknowns).lower()
@@ -47,7 +78,12 @@ async def run_ufac(user_data: dict) -> UFACResponse:
     
     Executes 5 agents in 2 batches with graceful fallbacks if any agent fails.
     """
+    # Sanitize input data
+    user_data = sanitize_user_data(user_data)
+    
     logger.info(f"Starting UFAC assessment with data: {list(user_data.keys())}")
+    
+    start = time.perf_counter()
     
     try:
         # Batch 1: Fact, Assumption, Unknown detection (parallel)
@@ -59,6 +95,15 @@ async def run_ufac(user_data: dict) -> UFACResponse:
                 detect_unknowns(user_data, PM_KISAN_RULES),
                 return_exceptions=True
             )
+            
+            # Record per-agent success/failure
+            for name, result in [
+                ("fact", fact_result),
+                ("assumption", assumption_result),
+                ("unknown", unknown_result)
+            ]:
+                from core.metrics import record_agent_run
+                record_agent_run(name, success=not isinstance(result, Exception))
             
             # Handle exceptions from batch 1
             if isinstance(fact_result, Exception):
@@ -93,6 +138,14 @@ async def run_ufac(user_data: dict) -> UFACResponse:
                 return_exceptions=True
             )
             
+            # Record per-agent success/failure
+            for name, result in [
+                ("confidence", confidence_result),
+                ("decision", decision_result)
+            ]:
+                from core.metrics import record_agent_run
+                record_agent_run(name, success=not isinstance(result, Exception))
+            
             # Handle exceptions from batch 2
             if isinstance(confidence_result, Exception):
                 logger.error(f"Confidence agent failed: {str(confidence_result)}", exc_info=confidence_result)
@@ -111,10 +164,14 @@ async def run_ufac(user_data: dict) -> UFACResponse:
         next_steps = decision_result.get("next_steps", [])
         decision_consensus = decision_result.get("consensus", 0.0)
 
-        risk = "HIGH" if confidence < 40 else "MEDIUM" if confidence < 70 else "LOW"
+        from core.constants import RISK_HIGH_THRESHOLD, RISK_MEDIUM_THRESHOLD
+        risk = "HIGH" if confidence < RISK_HIGH_THRESHOLD else "MEDIUM" if confidence < RISK_MEDIUM_THRESHOLD else "LOW"
         answer = _determine_answer(confidence, unknowns, known)
         
-        logger.info(f"UFAC assessment completed: confidence={confidence}, risk={risk}")
+        latency = time.perf_counter() - start
+        from core.metrics import record_request
+        record_request(success=True, latency=latency)
+        logger.info(f"UFAC completed in {latency:.2f}s: confidence={confidence}, risk={risk}")
 
         return UFACResponse(
             answer=answer,
@@ -132,5 +189,9 @@ async def run_ufac(user_data: dict) -> UFACResponse:
         )
         
     except Exception as e:
+        latency = time.perf_counter() - start
+        from core.metrics import record_request, record_error
+        record_request(success=False, latency=latency)
+        record_error("ufac_errors")
         logger.error(f"UFAC assessment failed: {str(e)}", exc_info=True)
         raise UFACError(f"Assessment failed: {str(e)}") from e
