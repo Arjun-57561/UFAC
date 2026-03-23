@@ -44,6 +44,9 @@ Backend will run at: **http://localhost:8000**
 - ✅ Circuit breaker for API resilience
 - ✅ Retry with exponential backoff
 - ✅ Configurable cache TTL
+- ✅ Database persistence (SQLite/PostgreSQL)
+- ✅ Assessment history tracking
+- ✅ Enhanced frontend with animations
 
 ### Step 2: Setup Frontend
 
@@ -109,6 +112,8 @@ User sees results ← Frontend ← JSON Response ← Backend ← Assessment
 | `/cache-stats` | GET | Cache statistics | |
 | `/metrics` | GET | System metrics | ✨ Enhanced |
 | `/circuit-status` | GET | Circuit breaker status | ✅ NEW |
+| `/history` | GET | Assessment history | ✅ NEW |
+| `/history/{id}` | GET | Assessment details | ✅ NEW |
 | `/docs` | GET | Interactive API docs | |
 
 ## 🧪 Test API Directly
@@ -118,6 +123,7 @@ Visit http://localhost:8000/docs for interactive API testing.
 Or use curl:
 
 ```bash
+# Run assessment
 curl -X POST "http://localhost:8000/check" \
   -H "Content-Type: application/json" \
   -d '{
@@ -127,6 +133,15 @@ curl -X POST "http://localhost:8000/check" \
     "aadhaar_linked": true,
     "bank_account": true
   }'
+
+# View assessment history
+curl http://localhost:8000/history
+
+# Check circuit breaker status
+curl http://localhost:8000/circuit-status
+
+# View metrics
+curl http://localhost:8000/metrics
 ```
 
 ## ❓ Troubleshooting
@@ -163,6 +178,13 @@ curl -X POST "http://localhost:8000/check" \
 - **New in v2.0**: After 5 consecutive failures, circuit opens for 60s
 - Check `/circuit-status` endpoint
 - Wait for recovery or fix underlying issue (API key, network)
+
+### Database errors
+- **New in v2.0**: Assessment history stored in SQLite by default
+- Check `DATABASE_URL` in `.env` if using custom database
+- Database file `ufac_engine.db` created automatically on first run
+- View history: `GET /history`
+- Get specific assessment: `GET /history/{id}`
 
 ## 📚 More Information
 

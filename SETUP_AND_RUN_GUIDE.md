@@ -60,6 +60,7 @@ Expected packages:
 - **slowapi** (rate limiting) - NEW in v2.0
 - **tenacity** (retry logic) - NEW in v2.0
 - **sqlalchemy, aiosqlite** (database) - NEW in v2.0
+- **alembic** (database migrations) - NEW in v2.0
 
 ---
 
@@ -94,6 +95,15 @@ LLM_TIMEOUT_SECONDS=15.0
 CACHE_TTL_ASSESSMENT=3600  # 1 hour
 CACHE_TTL_RAG=7200          # 2 hours
 CACHE_TTL_LLM=3600          # 1 hour
+```
+
+**Database Configuration (New in v2.0):**
+```bash
+# SQLite (default) - file created automatically
+DATABASE_URL=sqlite+aiosqlite:///./ufac_engine.db
+
+# PostgreSQL (production)
+# DATABASE_URL=postgresql+asyncpg://user:pass@localhost/ufac_db
 ```
 
 **Development Mode:**
@@ -183,6 +193,9 @@ curl http://localhost:8000/health
 # Check RAG status
 curl http://localhost:8000/rag-status
 
+# Check circuit breaker
+curl http://localhost:8000/circuit-status
+
 # Run eligibility assessment
 curl -X POST http://localhost:8000/check \
   -H "Content-Type: application/json" \
@@ -193,6 +206,15 @@ curl -X POST http://localhost:8000/check \
     "aadhaar_ekyc_done": true,
     "bank_account": true
   }'
+
+# View assessment history
+curl http://localhost:8000/history
+
+# Get specific assessment
+curl http://localhost:8000/history/{assessment_id}
+
+# View metrics
+curl http://localhost:8000/metrics
 ```
 
 ### Option B: Using Python
@@ -262,6 +284,10 @@ python main.py
 ### Assessment
 - `POST /check` - Run PM-KISAN eligibility assessment (Rate limited: 10/min)
 
+### History (NEW in v2.0)
+- `GET /history` - Recent assessment history with pagination
+- `GET /history/{id}` - Full assessment details by ID
+
 ### Monitoring
 - `GET /cache-stats` - Cache statistics
 - `POST /cache-clear` - Clear all caches
@@ -317,6 +343,21 @@ python main.py
 - Circuit breaker will automatically retry with exponential backoff
 - Try again after a few seconds
 
+### Issue: "Database errors" or "Failed to save assessment"
+**Solution** (NEW in v2.0):
+- Database saves are non-blocking - errors won't stop assessments
+- Check `DATABASE_URL` in .env is correct
+- For SQLite: Ensure write permissions in project directory
+- Database file `ufac_engine.db` created automatically on first run
+- View saved assessments: `GET /history`
+- Check logs for specific database errors
+
+### Issue: "Assessment not found" (404 on /history/{id})
+**Solution** (NEW in v2.0):
+- Verify assessment ID is correct (UUID format)
+- Check if assessment was saved (database errors are logged but don't fail requests)
+- Use `GET /history` to see all available assessment IDs
+
 ### Issue: "Port 8000 already in use"
 **Solution**:
 ```bash
@@ -349,6 +390,11 @@ uvicorn api.app:app --reload --host 0.0.0.0 --port 8001
 4. **Batch Requests**: Send multiple requests to benefit from caching
    - First request: ~8-10 seconds
    - Cached requests: ~0.1 seconds (80-100x faster)
+
+5. **Review History**: Track assessment patterns (NEW in v2.0)
+   - View recent assessments: `GET /history?limit=50`
+   - Analyze trends and common queries
+   - Export data for reporting
 
 ---
 
@@ -383,6 +429,7 @@ ufac-engine/
 │   ├── cache.py               # Caching layer with configurable TTL (v2.0)
 │   ├── metrics.py             # Metrics collection (v2.0)
 │   ├── circuit_breaker.py     # Circuit breaker pattern (NEW v2.0)
+│   ├── database.py            # Database persistence (NEW v2.0)
 │   ├── constants.py           # Centralized constants (NEW v2.0)
 │   ├── schema.py              # Data schemas
 │   └── __init__.py
