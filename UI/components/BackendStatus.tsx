@@ -1,55 +1,31 @@
-"use client";
-
-import { useBackendStatus } from "@/hooks/useBackendStatus";
-import { motion } from "framer-motion";
+"use client"
+import { useBackendStatus } from "@/hooks/useBackendStatus"
 
 export function BackendStatus() {
-  const { status, healthData } = useBackendStatus();
+  const { status, ragActive } = useBackendStatus()
 
-  const statusConfig = {
-    online: {
-      color: "bg-green-500",
-      label: "Backend: Online",
-      ragInfo: healthData?.rag?.initialized ? "RAG: Active" : "RAG: Inactive",
-    },
-    offline: {
-      color: "bg-red-500",
-      label: "Backend: Offline",
-      ragInfo: "RAG: Unknown",
-    },
-    checking: {
-      color: "bg-amber-500",
-      label: "Backend: Checking...",
-      ragInfo: "RAG: Unknown",
-    },
-  };
+  const colors = {
+    online: "#22c55e",
+    offline: "#ef4444",
+    checking: "#f59e0b"
+  }
 
-  const config = statusConfig[status];
+  const labels = {
+    online: "Backend Online",
+    offline: "Backend Offline",
+    checking: "Checking..."
+  }
 
   return (
-    <div className="group relative">
-      <motion.div
-        className={`w-2 h-2 rounded-full ${config.color}`}
-        animate={
-          status === "online"
-            ? { scale: [1, 1.2, 1], opacity: [1, 0.8, 1] }
-            : {}
-        }
-        transition={{ duration: 2, repeat: Infinity }}
+    <div className="flex items-center gap-2 text-xs"
+         title={`${labels[status]} | RAG: ${ragActive ? "Active" : "Inactive"}`}>
+      <span
+        style={{ backgroundColor: colors[status] }}
+        className={`w-2 h-2 rounded-full ${status === "checking" ? "animate-pulse" : ""}`}
       />
-      <div className="absolute left-0 top-full mt-2 w-48 p-2 bg-[hsl(var(--bg-card))] border border-[hsl(var(--border))] rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-        <p className="text-xs text-[hsl(var(--text-primary))] font-medium">
-          {config.label}
-        </p>
-        <p className="text-xs text-[hsl(var(--text-muted))] mt-1">
-          {config.ragInfo}
-        </p>
-        {status === "online" && healthData && (
-          <p className="text-xs text-[hsl(var(--text-muted))] mt-1">
-            {healthData.service}
-          </p>
-        )}
-      </div>
+      <span style={{ color: "hsl(var(--text-muted))" }} className="hidden sm:block">
+        {labels[status]}
+      </span>
     </div>
-  );
+  )
 }

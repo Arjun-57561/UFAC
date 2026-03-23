@@ -1,65 +1,46 @@
-"use client";
+"use client"
+import { useCountUp } from "@/hooks/useCountUp"
 
-import { motion } from "framer-motion";
-import { useCountUp } from "@/hooks/useCountUp";
-import { useEffect, useState } from "react";
+interface Props { value: number }
 
-interface ConfidenceRingProps {
-  confidence: number; // 0-100
-}
+export function ConfidenceRing({ value }: Props) {
+  const animated = useCountUp(value, 1500)
+  const radius = 54
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference - (animated / 100) * circumference
 
-export function ConfidenceRing({ confidence }: ConfidenceRingProps) {
-  const [mounted, setMounted] = useState(false);
-  const count = useCountUp(mounted ? confidence : 0, 1500);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const radius = 60;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (confidence / 100) * circumference;
-
-  const color =
-    confidence < 40
-      ? "hsl(0 72% 51%)" // red
-      : confidence < 70
-      ? "hsl(32 95% 44%)" // orange
-      : "hsl(var(--success))"; // green
+  const color = value >= 70
+    ? "hsl(var(--success))"
+    : value >= 40
+    ? "hsl(var(--warning))"
+    : "hsl(var(--danger))"
 
   return (
-    <div className="relative w-40 h-40">
-      <svg className="w-full h-full -rotate-90">
-        {/* Background circle */}
-        <circle
-          cx="80"
-          cy="80"
-          r={radius}
-          fill="none"
-          stroke="hsl(var(--border))"
-          strokeWidth="8"
-        />
-        {/* Progress circle */}
-        <motion.circle
-          cx="80"
-          cy="80"
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth="8"
+    <div className="flex flex-col items-center gap-2">
+      <svg width="128" height="128" viewBox="0 0 128 128">
+        <circle cx="64" cy="64" r={radius} fill="none"
+          stroke="hsl(var(--border))" strokeWidth="10" />
+        <circle cx="64" cy="64" r={radius} fill="none"
+          stroke={color} strokeWidth="10"
           strokeLinecap="round"
           strokeDasharray={circumference}
-          initial={{ strokeDashoffset: circumference }}
-          animate={{ strokeDashoffset: offset }}
-          transition={{ duration: 1.5, ease: "easeOut" }}
+          strokeDashoffset={offset}
+          transform="rotate(-90 64 64)"
+          style={{ transition: "stroke-dashoffset 0.05s linear" }}
         />
+        <text x="64" y="64" textAnchor="middle" dominantBaseline="central"
+          fontSize="24" fontWeight="bold" fill={color}>
+          {animated}
+        </text>
+        <text x="64" y="82" textAnchor="middle"
+          fontSize="11" fill="hsl(var(--text-muted))">
+          /100
+        </text>
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <div className="text-4xl font-bold" style={{ color }}>
-          {count}%
-        </div>
-        <div className="text-xs text-[hsl(var(--text-muted))]">Confidence</div>
-      </div>
+      <span style={{ color: "hsl(var(--text-secondary))" }}
+             className="text-sm font-medium">
+        Confidence
+      </span>
     </div>
-  );
+  )
 }
