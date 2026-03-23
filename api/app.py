@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: Initialize Groq API and RAG pipeline. Shutdown: cleanup."""
+    """Startup: Initialize Groq API, RAG pipeline, and Database. Shutdown: cleanup."""
     logger.info("="*70)
     logger.info("🚀 Starting UFAC Engine v2.0...")
     logger.info("="*70)
@@ -45,6 +45,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Unexpected error during Groq initialization: {str(e)}", exc_info=True)
         raise
+    
+    # Initialize Database
+    try:
+        from core.database import init_db
+        await init_db()
+        logger.info("✅ Database initialized")
+    except Exception as e:
+        logger.warning(f"⚠️  Database initialization failed: {str(e)}")
+        logger.info("Continuing without database persistence")
     
     # Initialize RAG pipeline
     rag_status = {"initialized": False, "error": None}
@@ -190,6 +199,11 @@ async def check_eligibility(request: Request, body: EligibilityCheckRequest):
     Runs all 5 agents with parallel async execution for low latency.
     Uses caching to avoid redundant assessments.
     """
+    import asyncio
+    from core.database import save_assessment
+    
+    start_time = time.time()
+    
     try:
         user_data = body.model_dump(exclude_none=True)
         logger.info(f"Processing eligibility check with fields: {list(user_data.keys())}")
@@ -202,6 +216,13 @@ async def check_eligibility(request: Request, body: EligibilityCheckRequest):
         if cached_result is not None:
             logger.info(f"✅ Cache hit: returning cached assessment (confidence={cached_result.confidence})")
             record_request(success=True, latency=0, cached=True)
+            
+            # Save cached result to DB (non-blocking)
+            response_time_ms = int((time.time() - start_time) * 1000)
+            asyncio.create_task(
+                save_assessment(user_data, cached_result, response_time_ms, was_cached=True)
+            )
+            
             return cached_result
         
         # Run assessment if not cached
@@ -210,6 +231,13 @@ async def check_eligibility(request: Request, body: EligibilityCheckRequest):
         # Cache the result
         cache.set(cache_key, result, ttl_seconds=3600)
         logger.info(f"Eligibility check completed: confidence={result.confidence}, risk={result.risk_level}")
+        
+        # Save to DB (non-blocking)
+        response_time_ms = int((time.time() - start_time) * 1000)
+        asyncio.create_task(
+            save_assessment(user_data, result, response_time_ms, was_cached=False)
+        )
+        
         return result
         
     except UFACError as e:
@@ -244,6 +272,9 @@ async def root():
             "cache_clear": "POST /cache-clear",
             "metrics": "GET /metrics",
             "metrics_reset": "POST /metrics-reset",
+            "circuit_status": "GET /circuit-status",
+            "history": "GET /history",
+            "history_detail": "GET /history/{id}",
             "docs": "GET /docs",
         },
     }
@@ -320,5 +351,65 @@ async def circuit_status():
     """Get circuit breaker status."""
     from core.circuit_breaker import groq_circuit_breaker
     return groq_circuit_breaker.get_status()
+
+
+@app.get("/history")
+async def get_history(limit: int = 20, offset: int = 0):
+    """
+    Get recent assessment history.
+    
+    Args:
+        limit: Maximum number of records (max 100)
+        offset: Number of records to skip
+        
+    Returns:
+        List of assessment summaries
+    """
+    from core.database import get_assessment_history
+    
+    try:
+        records = await get_assessment_history(limit, offset)
+        return {
+            "status": "ok",
+            "total": len(records),
+            "records": records
+        }
+    except Exception as e:
+        logger.error(f"Failed to get history: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get history: {str(e)}"
+        )
+
+
+@app.get("/history/{assessment_id}")
+async def get_assessment(assessment_id: str):
+    """
+    Get full details of a specific assessment.
+    
+    Args:
+        assessment_id: Assessment ID
+        
+    Returns:
+        Full assessment record
+    """
+    from core.database import get_assessment_by_id
+    
+    try:
+        record = await get_assessment_by_id(assessment_id)
+        if not record:
+            raise HTTPException(
+                status_code=404,
+                detail="Assessment not found"
+            )
+        return record
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get assessment: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get assessment: {str(e)}"
+        )
 
 
