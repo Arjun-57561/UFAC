@@ -4,10 +4,14 @@ import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
+import os
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from core.llm_utils import init_gemini, LLMInitializationError, LLMError
 from core.ufac_engine import run_ufac, UFACError
@@ -85,13 +89,34 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS Configuration - Environment-based
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# Rate Limiting
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 # Request/Response logging middleware
@@ -158,23 +183,25 @@ async def rag_status_endpoint():
 
 
 @app.post("/check", response_model=UFACResponse)
-async def check_eligibility(request: EligibilityCheckRequest):
+@limiter.limit("10/minute")
+async def check_eligibility(request: Request, body: EligibilityCheckRequest):
     """
     Check PM-KISAN eligibility.
     Runs all 5 agents with parallel async execution for low latency.
     Uses caching to avoid redundant assessments.
     """
     try:
-        user_data = request.model_dump(exclude_none=True)
+        user_data = body.model_dump(exclude_none=True)
         logger.info(f"Processing eligibility check with fields: {list(user_data.keys())}")
         
         # Check cache first
         cache = get_assessment_cache()
-        cache_key = cache._generate_key(user_data)
+        cache_key = cache.generate_key(user_data)
         
         cached_result = cache.get(cache_key)
         if cached_result is not None:
             logger.info(f"✅ Cache hit: returning cached assessment (confidence={cached_result.confidence})")
+            record_request(success=True, latency=0, cached=True)
             return cached_result
         
         # Run assessment if not cached
@@ -286,4 +313,12 @@ async def metrics_reset():
             status_code=500,
             detail=f"Failed to reset metrics: {str(e)}"
         )
+
+
+@app.get("/circuit-status")
+async def circuit_status():
+    """Get circuit breaker status."""
+    from core.circuit_breaker import groq_circuit_breaker
+    return groq_circuit_breaker.get_status()
+
 
