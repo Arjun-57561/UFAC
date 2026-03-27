@@ -102,6 +102,71 @@ Be respectful, inclusive, and constructive. We're all here to build something gr
 
 ---
 
+## 🧪 Testing Guidelines
+
+All contributions **must** include appropriate tests. We maintain a high standard of test coverage to keep the codebase reliable.
+
+### Running Tests
+
+```bash
+# Run the full test suite
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Generate a coverage report
+npm run test:coverage
+```
+
+### What to Test
+
+- **Unit tests** — cover individual functions and components in isolation.
+- **Integration tests** — verify that multiple parts of the system work together correctly.
+- **Edge cases** — always test boundary conditions, null/undefined inputs, and error states.
+
+### Guidelines
+
+- Place test files alongside the source file they test, using the `.test.ts` / `.test.js` / `.spec.ts` suffix.
+- Each PR should maintain or improve the existing coverage percentage — do not submit PRs that reduce coverage.
+- Mock external dependencies (APIs, databases) in unit tests — never rely on live services in the test suite.
+- Write descriptive test names that explain **what** is being tested and **what** the expected outcome is:
+  ```
+  ✅ "should return 404 when user is not found"
+  ❌ "test user endpoint"
+  ```
+
+---
+
+## 🔒 Security Policy
+
+We take security seriously. Please follow these guidelines to help keep the project and its users safe.
+
+### Supported Versions
+
+Only the latest stable release on `main` receives security patches. Please ensure you are on the latest version before reporting a vulnerability.
+
+### Reporting a Vulnerability
+
+**Do NOT open a public GitHub issue for security vulnerabilities.**
+
+Instead, please report them responsibly by emailing the core contributors directly or using GitHub's private [Security Advisory](https://docs.github.com/en/code-security/security-advisories) feature:
+
+1. Go to the repository's **Security** tab.
+2. Click **"Report a vulnerability"**.
+3. Fill in the details — include steps to reproduce, potential impact, and any suggested fixes if you have them.
+
+We aim to acknowledge reports within **48 hours** and provide a fix or mitigation plan within **7 days** for critical issues.
+
+### Security Best Practices for Contributors
+
+- **Never commit secrets** — no API keys, tokens, passwords, or credentials in code or config files. Use environment variables and a `.env.example` template instead.
+- Keep dependencies up to date and run `npm audit` (or equivalent) before submitting a PR.
+- Avoid using `eval()`, unsafe `innerHTML` assignments, or other patterns that can introduce XSS or injection vulnerabilities.
+- Follow the principle of least privilege — request only the permissions your code actually needs.
+
+---
+
 ## 📬 Questions?
 
 Reach out to any of the core contributors via GitHub, or open a Discussion in the repository.
