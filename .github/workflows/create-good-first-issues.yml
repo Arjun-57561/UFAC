@@ -19,7 +19,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create 10 good-first-issues
+      - name: Create labels and issues
         uses: actions/github-script@v7
         with:
           script: |
@@ -27,6 +27,40 @@ jobs:
             const issues = JSON.parse(
               fs.readFileSync('.github/issue-templates/good-first-issues.json', 'utf8')
             );
+
+            // Ensure all needed labels exist
+            const labelDefs = {
+              'testing':      { color: '0e8a16', description: 'Related to tests and test coverage' },
+              'code quality': { color: 'e4e669', description: 'Code readability and maintainability' },
+              'dependencies': { color: '0075ca', description: 'Dependency management and updates' },
+              'frontend':     { color: 'c5def5', description: 'Related to the React/Next.js UI' },
+              'refactoring':  { color: 'bfd4f2', description: 'Code restructuring without behaviour change' },
+              'validation':   { color: 'f9d0c4', description: 'Input validation and data integrity' },
+            };
+
+            for (const [name, def] of Object.entries(labelDefs)) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name
+                });
+                console.log(`Label already exists: ${name}`);
+              } catch (e) {
+                if (e.status === 404) {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name,
+                    color: def.color,
+                    description: def.description
+                  });
+                  console.log(`Created label: ${name}`);
+                } else {
+                  throw e;
+                }
+              }
+            }
 
             // Fetch existing open issues to avoid duplicates
             const existing = await github.paginate(github.rest.issues.listForRepo, {
@@ -37,7 +71,7 @@ jobs:
             });
             const existingTitles = new Set(existing.map(i => i.title));
 
-            console.log(`Creating up to ${issues.length} good-first-issues (skipping duplicates)...`);
+            console.log(`\nCreating up to ${issues.length} good-first-issues (skipping duplicates)...`);
             let createdCount = 0;
 
             for (const issue of issues) {
@@ -56,4 +90,4 @@ jobs:
               createdCount++;
             }
 
-            console.log(`Done! Created ${createdCount} new good-first-issues.`);
+            console.log(`\nDone! Created ${createdCount} new good-first-issues.`);
