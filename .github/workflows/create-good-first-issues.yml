@@ -2,6 +2,11 @@ name: Create Good First Issues
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - copilot/create-10-good-first-issues
+    paths:
+      - .github/workflows/create-good-first-issues.yml
 
 permissions:
   issues: write
@@ -231,9 +236,23 @@ Uses the existing FastAPI \`TestClient\` — no mocking required. Great for lear
               }
             ];
 
-            console.log(`Creating ${issues.length} good-first-issues...`);
+            // Fetch existing open issues to avoid duplicates
+            const existing = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              per_page: 100
+            });
+            const existingTitles = new Set(existing.map(i => i.title));
+
+            console.log(`Creating up to ${issues.length} good-first-issues (skipping duplicates)...`);
+            let created_count = 0;
 
             for (const issue of issues) {
+              if (existingTitles.has(issue.title)) {
+                console.log(`Skipping (already exists): ${issue.title}`);
+                continue;
+              }
               const created = await github.rest.issues.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -242,6 +261,7 @@ Uses the existing FastAPI \`TestClient\` — no mocking required. Great for lear
                 labels: issue.labels
               });
               console.log(`Created issue #${created.data.number}: ${issue.title}`);
+              created_count++;
             }
 
-            console.log("All 10 good-first-issues created successfully!");
+            console.log(`Done! Created ${created_count} new good-first-issues.`);
