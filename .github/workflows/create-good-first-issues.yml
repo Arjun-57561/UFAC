@@ -6,247 +6,39 @@ on:
     branches:
       - copilot/create-10-good-first-issues
     paths:
-      - .github/workflows/create-good-first-issues.yml
+      - .github/issue-templates/good-first-issues.json
 
 permissions:
   issues: write
+  contents: read
 
 jobs:
   create-issues:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Create 10 good-first-issues
         uses: actions/github-script@v7
         with:
           script: |
-            const issues = [
-              {
-                title: "Add unit tests for core/circuit_breaker.py",
-                body: `## Description
-The \`core/circuit_breaker.py\` module implements the circuit breaker pattern that prevents cascading LLM failures, but it has no dedicated test coverage. New contributors can write focused unit tests to verify its behaviour.
-
-## Tasks
-- [ ] Write a test that verifies the breaker opens after 5 consecutive failures
-- [ ] Write a test that verifies the breaker auto-recovers after 60 seconds
-- [ ] Write a test that verifies calls are rejected while the breaker is open
-- [ ] Write a test that verifies the failure counter resets after a successful call
-
-## Acceptance Criteria
-- Tests live in \`tests/test_circuit_breaker.py\`
-- All tests pass with \`pytest tests/test_circuit_breaker.py -v\`
-- Uses existing test patterns from \`tests/conftest.py\`
-
-## Good First Issue Notes
-This is a great starting point — the circuit breaker logic is self-contained and easy to unit test with mocking.`,
-                labels: ["good first issue", "testing"]
-              },
-              {
-                title: "Add type hints to data/pm_kisan_rules.py",
-                body: `## Description
-The \`data/pm_kisan_rules.py\` file contains the hardcoded PM-KISAN eligibility rules but lacks Python type annotations. Adding type hints improves IDE support, catches bugs early, and aligns it with the rest of the codebase where \`core/\` files already use type hints.
-
-## Tasks
-- [ ] Add parameter and return-type annotations to all functions in \`data/pm_kisan_rules.py\`
-- [ ] Follow the typing conventions used in \`core/fact_agent.py\` and \`core/schema.py\`
-- [ ] Run \`mypy data/pm_kisan_rules.py\` (or \`pyright\`) and resolve any errors
-
-## Acceptance Criteria
-- Every function has complete type annotations
-- No mypy / pyright type errors introduced
-- Existing functionality is unchanged (all tests still pass)
-
-## Good First Issue Notes
-A great beginner task — no logic changes needed, just reading existing code and adding annotations.`,
-                labels: ["good first issue", "code quality"]
-              },
-              {
-                title: "Add GET /schemes endpoint listing supported government schemes",
-                body: `## Description
-The UFAC Engine currently only supports PM-KISAN, but the architecture is designed to scale to 150+ schemes. A new \`GET /schemes\` endpoint would give API consumers a way to discover which schemes are currently supported without reading the source code.
-
-## Proposed Response
-\`\`\`json
-{
-  "schemes": [
-    {
-      "id": "pm_kisan",
-      "name": "PM-KISAN",
-      "description": "Pradhan Mantri Kisan Samman Nidhi – direct income support to farmer families",
-      "supported": true
-    }
-  ],
-  "total": 1
-}
-\`\`\`
-
-## Tasks
-- [ ] Add a \`SUPPORTED_SCHEMES\` constant in \`core/constants.py\`
-- [ ] Add \`GET /schemes\` route in \`api/app.py\`
-- [ ] Write a test in \`tests/test_api.py\`
-- [ ] Document the endpoint in README.md under **API Endpoints**
-
-## Acceptance Criteria
-- \`GET /schemes\` returns HTTP 200 with the scheme list
-- Endpoint is visible in Swagger UI (\`/docs\`)
-- At least one passing test
-
-## Good First Issue Notes
-A simple read-only endpoint with no external dependencies — perfect for a first contribution.`,
-                labels: ["good first issue", "enhancement"]
-              },
-              {
-                title: "Pin all dependency versions in requirements.txt",
-                body: `## Description
-Several packages in \`requirements.txt\` are listed without pinned versions (e.g. \`uvicorn\`, \`python-dotenv\`). Unpinned dependencies can cause silent breakage when a new version is released. All versions should be pinned so that \`pip install -r requirements.txt\` produces an identical environment every time.
-
-## Tasks
-- [ ] Run \`pip freeze\` in a clean virtual environment after installing the current \`requirements.txt\`
-- [ ] Update each package entry to use \`==\` with the resolved version
-- [ ] Verify the server still starts after the change
-- [ ] Add a comment at the top of \`requirements.txt\` explaining how to update versions
-
-## Acceptance Criteria
-- Every line in \`requirements.txt\` uses \`package==X.Y.Z\` format
-- \`pip install -r requirements.txt\` succeeds in a fresh virtual environment
-- All existing tests still pass
-
-## Good First Issue Notes
-No code logic involved — just dependency management. Great for learning about Python packaging.`,
-                labels: ["good first issue", "dependencies"]
-              },
-              {
-                title: "Add input validation for negative and out-of-range numeric values in /check",
-                body: `## Description
-The \`POST /check\` endpoint accepts user data but does not reject clearly invalid numeric inputs such as negative land area, negative annual income, or income values that exceed the constant \`MAX_INCOME_VALUE\`. An attacker or misconfigured client could send \`"annual_income": -99999\` and receive a confusing assessment result.
-
-## Tasks
-- [ ] Add Pydantic validators to \`core/schema.py\` for all numeric fields (\`annual_income\`, \`land_area\`, etc.) to reject negative values
-- [ ] Return a clear HTTP 422 with a descriptive message for invalid inputs
-- [ ] Add tests in \`tests/test_api.py\` for negative / out-of-range inputs
-
-## Acceptance Criteria
-- \`POST /check\` with \`"annual_income": -1\` returns HTTP 422
-- Error message clearly explains the constraint
-- Existing valid requests are unaffected
-
-## Good First Issue Notes
-Uses Pydantic validators — great way to learn FastAPI input validation.`,
-                labels: ["good first issue", "bug", "validation"]
-              },
-              {
-                title: "Add CHANGELOG.md to track version history",
-                body: `## Description
-The project is at v2.0.0 but has no \`CHANGELOG.md\` documenting what changed between versions. A changelog helps contributors understand the project's evolution and helps users know what to expect when upgrading.
-
-## Tasks
-- [ ] Create \`CHANGELOG.md\` at the project root following the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format
-- [ ] Document the changes introduced in **v2.0.0** (security hardening, circuit breaker, caching, PostgreSQL support) based on the existing summary files
-- [ ] Document the baseline **v1.0.0** features (5-agent architecture, RAG pipeline, PM-KISAN rules)
-- [ ] Add a link to \`CHANGELOG.md\` from \`README.md\`
-
-## Acceptance Criteria
-- \`CHANGELOG.md\` exists at project root
-- Entries follow Keep a Changelog format (Added, Changed, Fixed, Removed sections)
-- README.md links to it
-
-## Good First Issue Notes
-Documentation-only change — no code required. Great for learning the project's history.`,
-                labels: ["good first issue", "documentation"]
-              },
-              {
-                title: "Move hardcoded strings in api/app.py to core/constants.py",
-                body: `## Description
-\`api/app.py\` contains several hardcoded string literals (security header names/values, error message strings, endpoint descriptions) that are used directly inline. These should be moved to \`core/constants.py\` to make them easy to find and update, and to be consistent with the project's existing pattern of centralising magic values.
-
-## Tasks
-- [ ] Identify all hardcoded string literals in \`api/app.py\` that are not variable names or log messages (e.g. header names like \`"X-Content-Type-Options"\`, response phrases)
-- [ ] Add appropriately named constants in \`core/constants.py\` (e.g. \`HEADER_CONTENT_TYPE_OPTIONS = "X-Content-Type-Options"\`)
-- [ ] Replace inline strings in \`api/app.py\` with the new constants
-- [ ] Verify all existing tests still pass
-
-## Acceptance Criteria
-- No raw header-name strings remain in \`api/app.py\`
-- New constants are grouped under a clear comment in \`core/constants.py\`
-- All tests pass
-
-## Good First Issue Notes
-A pure refactoring task — no new logic. Helps you explore both the API layer and the constants module.`,
-                labels: ["good first issue", "refactoring"]
-              },
-              {
-                title: "Add shared pytest fixtures for common test data in tests/conftest.py",
-                body: `## Description
-The test files (\`test_api.py\`, \`test_cache.py\`, \`test_error_handling.py\`) each define their own sample user-data dictionaries. This duplication means that if the data model changes, tests break in multiple places. Shared fixtures in \`tests/conftest.py\` would solve this.
-
-## Tasks
-- [ ] Add a \`sample_eligible_user\` fixture to \`tests/conftest.py\` returning a dict representing a clearly eligible PM-KISAN applicant
-- [ ] Add a \`sample_ineligible_user\` fixture returning a dict representing an ineligible applicant
-- [ ] Add a \`sample_incomplete_user\` fixture with missing required fields
-- [ ] Refactor existing test files to use these shared fixtures instead of inline dicts
-
-## Acceptance Criteria
-- Fixtures are defined in \`tests/conftest.py\`
-- All existing tests still pass after refactoring
-- No duplicate sample-data dicts remain in individual test files
-
-## Good First Issue Notes
-A great refactoring task that improves test maintainability without changing any application logic.`,
-                labels: ["good first issue", "testing"]
-              },
-              {
-                title: "Add confidence score colour coding to the React UI",
-                body: `## Description
-The frontend (\`UI/\`) displays the confidence score as a plain number. A simple colour-coded indicator (green for high confidence ≥ 80, amber for medium 65–79, red for low < 65) would make the result much easier to interpret at a glance.
-
-## Tasks
-- [ ] Locate the confidence score display component in \`UI/components/\`
-- [ ] Add a helper function \`getConfidenceColour(score: number)\` that returns a Tailwind CSS colour class based on the thresholds defined in \`core/constants.py\` (CONFIDENCE_HIGH = 80, CONFIDENCE_MEDIUM = 65)
-- [ ] Apply the colour class to the score badge/text
-- [ ] Test visually with scores in the high, medium, and low ranges using the demo button
-
-## Acceptance Criteria
-- Score ≥ 80 appears green
-- Score 65–79 appears amber/yellow
-- Score < 65 appears red
-- All thresholds match the backend constants (80 / 65)
-
-## Good First Issue Notes
-A self-contained UI change — no backend knowledge required. Great for frontend contributors.`,
-                labels: ["good first issue", "enhancement", "frontend"]
-              },
-              {
-                title: "Add /metrics endpoint tests to tests/test_api.py",
-                body: `## Description
-The \`GET /metrics\` and \`POST /metrics-reset\` endpoints are used in production for monitoring but are not covered by any tests in \`tests/test_api.py\`. Adding tests for these endpoints ensures that monitoring data is always returned in the correct shape and that the reset operation works as expected.
-
-## Tasks
-- [ ] Add a test that calls \`GET /metrics\` and verifies the response contains expected top-level keys (\`total_requests\`, \`cache_hits\`, \`average_latency_ms\`, etc.)
-- [ ] Add a test that calls \`POST /metrics-reset\` and then \`GET /metrics\` to confirm counters are zeroed
-- [ ] Add a test that calls \`GET /cache-stats\` and verifies its response shape
-- [ ] Use the existing \`TestClient\` setup already in \`tests/test_api.py\`
-
-## Acceptance Criteria
-- At least 3 new tests added
-- All tests pass with \`pytest tests/test_api.py -v\`
-- Tests cover both the happy path and the reset flow
-
-## Good First Issue Notes
-Uses the existing FastAPI \`TestClient\` — no mocking required. Great for learning API testing patterns.`,
-                labels: ["good first issue", "testing"]
-              }
-            ];
+            const fs = require('fs');
+            const issues = JSON.parse(
+              fs.readFileSync('.github/issue-templates/good-first-issues.json', 'utf8')
+            );
 
             // Fetch existing open issues to avoid duplicates
             const existing = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              state: "open",
+              state: 'open',
               per_page: 100
             });
             const existingTitles = new Set(existing.map(i => i.title));
 
             console.log(`Creating up to ${issues.length} good-first-issues (skipping duplicates)...`);
-            let created_count = 0;
+            let createdCount = 0;
 
             for (const issue of issues) {
               if (existingTitles.has(issue.title)) {
@@ -261,7 +53,7 @@ Uses the existing FastAPI \`TestClient\` — no mocking required. Great for lear
                 labels: issue.labels
               });
               console.log(`Created issue #${created.data.number}: ${issue.title}`);
-              created_count++;
+              createdCount++;
             }
 
-            console.log(`Done! Created ${created_count} new good-first-issues.`);
+            console.log(`Done! Created ${createdCount} new good-first-issues.`);
