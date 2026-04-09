@@ -10,6 +10,8 @@ export function Footer() {
   const { status } = useBackendStatus();
   const [ragStatus, setRagStatus] = useState<RAGStatus | null>(null);
 
+  const collectionCount = ragStatus?.rag?.collection_count;
+
   useEffect(() => {
     const fetchRagStatus = async () => {
       try {
@@ -109,8 +111,7 @@ export function Footer() {
               </div>
               {ragStatus?.rag && (
                 <div className="text-[hsl(var(--text-muted))]">
-                  📚 RAG: {ragStatus.rag.collection_count.toLocaleString()}{" "}
-                  chunks indexed
+                  📚 RAG: {collectionCount?.toLocaleString() ?? "unknown"} chunks indexed
                 </div>
               )}
               <div className="text-[hsl(var(--text-muted))]">
