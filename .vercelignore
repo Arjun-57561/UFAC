@@ -1,0 +1,17 @@
+# Ignore everything except the UI folder
+api/
+core/
+data/
+tests/
+*.py
+*.txt
+*.pdf
+*.db
+.env
+render.yaml
+main.py
+setup_rag.py
+__pycache__/
+*.pyc
+.venv/
+venv/
