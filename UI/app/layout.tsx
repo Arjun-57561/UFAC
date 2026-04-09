@@ -3,8 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
-import { Navbar } from "@/components/Navbar";
-import { Footer } from "@/components/Footer";
+import { Navbar } from "@/components/navbar";
+import { Footer } from "@/components/footer";
 import { Providers } from "@/components/Providers";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
