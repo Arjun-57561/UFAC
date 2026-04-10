@@ -27,15 +27,33 @@ export interface AgentResult {
   confidence: number;
 }
 
+/**
+ * UFACResponse — unified shape used by both /check pages and the agent-flow page.
+ * Fields from the UFAC multi-agent backend.
+ */
 export interface UFACResponse {
-  eligible: boolean;
-  confidence: number;
-  final_decision: string;
-  summary: string;
-  agents: AgentResult[];
-  disqualifiers: string[];
-  recommendations: string[];
+  // Legacy / simple fields
+  eligible?: boolean;
+  final_decision?: string;
+  summary?: string;
+  agents?: AgentResult[];
+  disqualifiers?: string[];
+  recommendations?: string[];
   rag_sources?: string[];
+
+  // UFAC multi-agent fields
+  answer?: string;
+  confidence: number;
+  known_facts?: string[];
+  assumptions?: string[];
+  unknowns?: string[];
+  risk_level?: "LOW" | "MEDIUM" | "HIGH";
+  next_steps?: string[];
+  fact_consensus?: number;
+  assumption_consensus?: number;
+  unknown_consensus?: number;
+  confidence_consensus?: number;
+  decision_consensus?: number;
 }
 
 // ─── Error Class ──────────────────────────────────────────────────────────────
@@ -56,8 +74,7 @@ export async function checkEligibility(
 ): Promise<{ data: UFACResponse; responseTime: number }> {
   const start = Date.now();
   try {
-    // CORRECT
-  const res = await fetch(`${API_BASE}/check`, {
+    const res = await fetch(`${API_BASE}/check`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -78,16 +95,21 @@ export async function checkEligibility(
 // ─── RAG Status Types ─────────────────────────────────────────────────────────
 export interface RAGStatus {
   status: "ok" | "degraded" | "offline";
-  documents: number;
-  message: string;
+  rag?: {
+    initialized?: boolean;
+    collection_count?: number;
+  };
+  documents?: number;
+  message?: string;
 }
 
 export async function getRagStatus(): Promise<RAGStatus> {
   try {
-    const res = await fetch(`${API_BASE}/rag-status`, { cache: "no-store" });
-    if (!res.ok) return { status: "degraded", documents: 0, message: "Degraded" };
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const res = await fetch(`${apiBase}/rag-status`, { cache: "no-store" });
+    if (!res.ok) return { status: "degraded" };
     return res.json();
   } catch {
-    return { status: "offline", documents: 0, message: "Offline" };
+    return { status: "offline" };
   }
 }
