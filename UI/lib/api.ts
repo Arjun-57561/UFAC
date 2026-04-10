@@ -56,7 +56,8 @@ export async function checkEligibility(
 ): Promise<{ data: UFACResponse; responseTime: number }> {
   const start = Date.now();
   try {
-    const res = await fetch(`${API_BASE}/check-eligibility`, {
+    // CORRECT
+  const res = await fetch(`${API_BASE}/check`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
