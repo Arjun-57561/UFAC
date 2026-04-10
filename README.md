@@ -24,7 +24,7 @@
 
 <br/>
 
-> **UFAC** (Unknown · Fact · Assumption · Confidence) is a multi-agent LLM reasoning framework
+> **UFAC** (Uncertainity · First · Agent · Council) is a multi-agent LLM reasoning framework
 > that determines a farmer's eligibility for India's **PM-KISAN** ₹6,000/year direct benefit scheme
 > using a council of 5 specialized AI agents working in parallel.
 
