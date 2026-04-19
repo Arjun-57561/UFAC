@@ -1,0 +1,205 @@
+PM-KISAN Scheme (Pradhan Mantri Kisan Samman Nidhi)
+
+The PM-KISAN scheme is a central government income-support programme for landholding farmer families in India. It provides direct financial assistance to help farmers meet agricultural expenses such as seeds, fertilizers, irrigation, labour, and other basic needs.
+
+It was announced in December 2018 and formally launched on 24 February 2019.
+
+1. Main Objective
+
+The main aim of PM-KISAN is to provide a fixed amount of financial support directly to farmers so that they do not have to depend entirely on loans or informal borrowing for crop-related expenses.
+
+Key objectives include:
+
+Supporting small and marginal farmers
+Providing assured supplementary income
+Reducing dependence on moneylenders
+Helping farmers buy seeds, fertilizers, pesticides, etc.
+Improving agricultural productivity and rural stability
+2. Amount Given Under the Scheme
+
+Under PM-KISAN, every eligible farmer family receives:
+
+₹6,000 per year
+Paid in 3 equal instalments
+₹2,000 per instalment
+Money is transferred directly into the beneficiary’s bank account through DBT (Direct Benefit Transfer)
+
+The three instalment periods are:
+
+Instalment	Period
+1st	April – July
+2nd	August – November
+3rd	December – March
+
+3. Latest Status in 2026
+
+The 22nd instalment of PM-KISAN was released in March 2026. More than ₹18,640 crore was transferred to over 9.32 crore farmer families across India.
+
+A short timeline of recent instalments:
+
+Instalment	Release Date
+22nd	13 March 2026
+21st	19 November 2025
+20th	2 August 2025
+19th	24 February 2025
+18th	5 October 2024
+
+4. Who Is Eligible?
+
+A farmer family is eligible if:
+
+They are Indian citizens
+They own cultivable agricultural land
+The land is recorded in government land records
+The family consists of husband, wife, and minor children
+Aadhaar is linked to the application and bank account
+e-KYC is completed
+
+Initially the scheme was only for small and marginal farmers, but later it was expanded to all landholding farmer families irrespective of land size.
+
+5. Who Is NOT Eligible?
+
+The following categories are excluded from PM-KISAN:
+
+Institutional landholders
+Income-tax payers
+Serving or retired government employees (except Class IV/Multi-Tasking staff)
+Professionals such as:
+Doctors
+Engineers
+Lawyers
+Chartered Accountants
+Architects
+Pensioners receiving more than ₹10,000 per month
+Current or former MPs, MLAs, Ministers, Mayors, etc.
+Farmers who do not own land
+Tenant farmers and sharecroppers without legal ownership records
+
+6. Documents Required
+
+To apply for PM-KISAN, the farmer generally needs:
+
+Aadhaar Card
+Bank account details
+IFSC code
+Land ownership documents
+Mobile number
+Residence proof
+7. How to Apply
+
+Farmers can apply in three ways:
+
+Through the official PM-KISAN portal
+Through Common Service Centres (CSC)
+Through local agriculture department offices or village-level officers
+
+The official portal is:
+
+PM-KISAN Official Portal
+
+8. Step-by-Step Online Registration Process
+Open the PM-KISAN website
+Go to “New Farmer Registration”
+Enter:
+Aadhaar number
+Mobile number
+State
+Verify using OTP
+Fill in personal details and land details
+Upload required documents
+Submit the application
+Wait for approval by state authorities
+9. e-KYC Requirement
+
+e-KYC is mandatory. Farmers who do not complete e-KYC may stop receiving instalments.
+
+Methods to complete e-KYC:
+
+OTP-based e-KYC on the PM-KISAN website
+Biometric e-KYC at CSC centres
+Face-authentication through the PM-KISAN mobile app
+
+10. How to Check Beneficiary Status
+
+A farmer can check whether payment has been credited by:
+
+Visiting the PM-KISAN portal
+Selecting “Beneficiary Status”
+Entering:
+Aadhaar number, or
+Mobile number, or
+Registration number
+Viewing payment history and instalment status
+
+The status page shows:
+
+Whether the application is approved
+Whether instalment is released
+Whether e-KYC is complete
+Whether Aadhaar-bank linking is successful
+11. Common Reasons for Rejection or Delay
+
+A farmer may not receive the instalment because of:
+
+e-KYC not completed
+Aadhaar not linked with bank account
+Wrong bank account number or IFSC
+Land record mismatch
+Duplicate application
+Ineligible category
+Spelling mismatch between Aadhaar and bank details
+
+Recent beneficiary numbers decreased slightly because the government carried out stricter verification and removed ineligible or duplicate entries.
+
+12. Important Features of PM-KISAN
+Fully funded by Government of India
+100% Direct Benefit Transfer
+No middlemen
+Transparent digital system
+Benefits are directly credited to bank accounts
+Covers crores of farmers across India
+Linked with Aadhaar and bank verification
+13. Advantages of the Scheme
+Economic Benefits
+Helps farmers buy inputs on time
+Reduces financial pressure
+Supports small and marginal farmers
+Social Benefits
+Improves rural living conditions
+Increases confidence among farmers
+Promotes financial inclusion
+Agricultural Benefits
+Better crop preparation
+Timely purchase of seeds and fertilizer
+Less dependency on private lenders
+14. Major Criticisms and Challenges
+
+Although PM-KISAN is widely used, some issues still exist:
+
+Tenant farmers and landless farmers are excluded
+₹6,000 per year may be too low for large farming expenses
+Land record errors cause delays
+Some states take time to verify applications
+Many farmers are unaware of e-KYC requirements
+15. PM-KISAN and Other Related Schemes
+
+PM-KISAN is often linked with other farmer schemes such as:
+
+Kisan Credit Card
+Pradhan Mantri Fasal Bima Yojana
+PM-KUSUM
+Soil Health Card Scheme
+
+Many farmers receiving PM-KISAN also use these schemes for loans, insurance, soil testing, and solar irrigation.
+
+16. Key Facts at a Glance
+Feature	Details
+Full Name	Pradhan Mantri Kisan Samman Nidhi
+Launch Date	24 February 2019
+Annual Benefit	₹6,000
+Instalment Amount	₹2,000
+Number of Instalments	3 per year
+Payment Method	Direct Benefit Transfer
+Beneficiaries	Landholding farmer families
+Main Requirement	Aadhaar + e-KYC + land records
+Official Website	pmkisan.gov.in
