@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { LayoutWrapper } from '@/components/layout-wrapper';
-import { EligibilityForm } from '@/components/eligibility-form';
+import { EligibilityForm } from '@/components/EligibilityForm';
 import { EligibilityResults, EligibilityResult } from '@/components/eligibility-results';
 import { useUFACAssessment } from '@/hooks/useUFACAssessment';
 

@@ -9,8 +9,9 @@ export function useBackendStatus() {
 
   const check = async () => {
     try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/health`,
+        `${apiUrl}/health`,
         { signal: AbortSignal.timeout(5000) }
       )
       if (res.ok) {

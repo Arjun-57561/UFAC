@@ -5,17 +5,25 @@ import Link from "next/link";
 import { ArrowRight, Brain, Zap, Activity } from "lucide-react";
 import { PageTransition } from "@/components/PageTransition";
 import { useCountUp } from "@/hooks/useCountUp";
-import { useRef } from "react";
+import { useRef, useState, useEffect } from "react";
 
 function FloatingParticles() {
-  const particles = Array.from({ length: 15 }, (_, i) => ({
-    id: i,
-    size: Math.random() * 40 + 20,
-    left: `${Math.random() * 100}%`,
-    top: `${Math.random() * 100}%`,
-    duration: Math.random() * 4 + 8,
-    delay: Math.random() * 2,
-  }));
+  const [particles, setParticles] = useState<
+    { id: number; size: number; left: string; top: string; duration: number; delay: number }[]
+  >([]);
+
+  useEffect(() => {
+    setParticles(
+      Array.from({ length: 15 }, (_, i) => ({
+        id: i,
+        size: Math.random() * 40 + 20,
+        left: `${Math.random() * 100}%`,
+        top: `${Math.random() * 100}%`,
+        duration: Math.random() * 4 + 8,
+        delay: Math.random() * 2,
+      }))
+    );
+  }, []);
 
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none">

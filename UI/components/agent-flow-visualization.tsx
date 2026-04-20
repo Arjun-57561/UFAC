@@ -50,8 +50,8 @@ interface AgentFlowVisualizationProps {
 }
 
 export function AgentFlowVisualization({ response, isLoading }: AgentFlowVisualizationProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
 
   // Initialize nodes and edges based on UFAC agents

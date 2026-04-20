@@ -1,0 +1,22 @@
+---
+services:
+  - type: web
+    name: ufac-api
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn api.app:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DEV_MODE
+        value: "false"
+      - key: ALLOWED_ORIGINS
+        value: "https://ufac.vercel.app"
+      - key: DATABASE_URL
+        value: "sqlite+aiosqlite:///./ufac_engine.db"
+      - key: LLM_TIMEOUT_SECONDS
+        value: "20.0"
+      - key: CACHE_TTL_ASSESSMENT
+        value: "3600"
