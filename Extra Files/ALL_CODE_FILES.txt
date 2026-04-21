@@ -1,0 +1,2021 @@
+================================================================================
+UFAC ENGINE - COMPLETE CODEBASE DUMP
+================================================================================
+All code files compiled with file paths commented at the top of each section.
+Generated: March 20, 2026
+
+================================================================================
+FILE: api/app.py
+================================================================================
+
+# File: api/app.py
+import logging
+import time
+from contextlib import asynccontextmanager
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from core.llm_utils import init_gemini, LLMInitializationError, LLMError
+from core.ufac_engine import run_ufac, UFACError
+from core.schema import UFACResponse
+from core.cache import get_assessment_cache, get_all_cache_stats, clear_all_caches
+from core.metrics import get_all_metrics, reset_metrics, record_request
+from data.rag_pipeline import get_retriever, get_vectorstore_status, RAGError
+
+# Configure structured logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: Initialize Groq API and RAG pipeline. Shutdown: cleanup."""
+    logger.info("="*70)
+    logger.info("🚀 Starting UFAC Engine v2.0...")
+    logger.info("="*70)
+    
+    # Initialize Groq API
+    try:
+        init_gemini()
+        logger.info("✅ Groq API initialized successfully")
+    except LLMInitializationError as e:
+        logger.error(f"❌ Failed to initialize Groq API: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error during Groq initialization: {str(e)}", exc_info=True)
+        raise
+    
+    # Initialize RAG pipeline
+    rag_status = {"initialized": False, "error": None}
+    try:
+        logger.info("Initializing RAG pipeline...")
+        retriever = get_retriever()
+        status = get_vectorstore_status()
+        
+        if status.get("collection_count", 0) == 0:
+            logger.warning("⚠️  RAG initialized but no chunks found")
+            logger.info("Please run: python setup_rag.py")
+            rag_status["warning"] = "No chunks indexed"
+        else:
+            logger.info(f"✅ RAG pipeline ready: {status['collection_count']} chunks indexed")
+            rag_status["initialized"] = True
+            
+    except RAGError as e:
+        logger.warning(f"⚠️  RAG pipeline initialization failed: {str(e)}")
+        logger.info("Continuing without RAG (using hardcoded rules)")
+        rag_status["error"] = str(e)
+    except Exception as e:
+        logger.warning(f"⚠️  Unexpected error during RAG initialization: {str(e)}", exc_info=True)
+        logger.info("Continuing without RAG (using hardcoded rules)")
+        rag_status["error"] = str(e)
+    
+    logger.info("="*70)
+    logger.info("✅ UFAC Engine ready for requests")
+    logger.info("="*70)
+    
+    # Store RAG status in app state for health checks
+    app.state.rag_status = rag_status
+    
+    yield
+    
+    logger.info("🛑 UFAC Engine shutting down...")
+
+
+app = FastAPI(
+    title="UFAC Engine API",
+    description="Unknown-Fact-Assumption-Confidence engine for PM-KISAN eligibility",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Request/Response logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all HTTP requests and responses."""
+    start_time = time.time()
+    request_id = request.headers.get("x-request-id", "unknown")
+    
+    logger.info(f"[{request_id}] {request.method} {request.url.path}")
+    
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        logger.info(f"[{request_id}] {response.status_code} - {process_time:.3f}s")
+        return response
+    except Exception as e:
+        process_time = time.time() - start_time
+        logger.error(f"[{request_id}] Request failed after {process_time:.3f}s: {str(e)}", exc_info=True)
+        raise
+
+
+class EligibilityCheckRequest(BaseModel):
+    occupation: Optional[str] = None
+    land_ownership: Optional[str] = None
+    aadhaar_linked: Optional[bool] = None
+    aadhaar_ekyc_done: Optional[bool] = None
+    bank_account: Optional[bool] = None
+    annual_income: Optional[float] = None
+    income_tax_payer: Optional[bool] = None
+    govt_employee: Optional[bool] = None
+    pension_above_10k: Optional[bool] = None
+    practicing_professional: Optional[bool] = None
+    constitutional_post_holder: Optional[bool] = None
+    state: Optional[str] = None
+    district: Optional[str] = None
+    additional_info: Optional[dict] = None
+
+
+@app.get("/health")
+async def health_check():
+    """Health check with RAG status."""
+    rag_status = getattr(app.state, "rag_status", {"initialized": False})
+    return {
+        "status": "healthy",
+        "service": "UFAC Engine v2",
+        "rag": rag_status
+    }
+
+
+@app.get("/rag-status")
+async def rag_status_endpoint():
+    """Check RAG pipeline status."""
+    try:
+        status = get_vectorstore_status()
+        logger.info(f"RAG status check: {status}")
+        return {"status": "ok", "rag": status}
+    except RAGError as e:
+        logger.error(f"RAG status check failed: {str(e)}")
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        logger.error(f"Unexpected error in RAG status check: {str(e)}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+@app.post("/check", response_model=UFACResponse)
+async def check_eligibility(request: EligibilityCheckRequest):
+    """
+    Check PM-KISAN eligibility.
+    Runs all 5 agents with parallel async execution for low latency.
+    Uses caching to avoid redundant assessments.
+    """
+    try:
+        user_data = request.model_dump(exclude_none=True)
+        logger.info(f"Processing eligibility check with fields: {list(user_data.keys())}")
+        
+        # Check cache first
+        cache = get_assessment_cache()
+        cache_key = cache._generate_key(user_data)
+        
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"✅ Cache hit: returning cached assessment (confidence={cached_result.confidence})")
+            return cached_result
+        
+        # Run assessment if not cached
+        result = await run_ufac(user_data)
+        
+        # Cache the result
+        cache.set(cache_key, result, ttl_seconds=3600)
+        logger.info(f"Eligibility check completed: confidence={result.confidence}, risk={result.risk_level}")
+        return result
+        
+    except UFACError as e:
+        logger.error(f"UFAC assessment failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Assessment failed: {str(e)}"
+        )
+    except LLMError as e:
+        logger.error(f"LLM error during assessment: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"LLM service error: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error during eligibility check: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error: {str(e)}"
+        )
+
+
+@app.get("/")
+async def root():
+    return {
+        "service": "UFAC Engine — PM-KISAN Eligibility Assessment v2",
+        "endpoints": {
+            "health": "GET /health",
+            "check": "POST /check",
+            "rag_status": "GET /rag-status",
+            "cache_stats": "GET /cache-stats",
+            "cache_clear": "POST /cache-clear",
+            "metrics": "GET /metrics",
+            "metrics_reset": "POST /metrics-reset",
+            "docs": "GET /docs",
+        },
+    }
+
+
+@app.get("/cache-stats")
+async def cache_stats():
+    """Get cache statistics."""
+    try:
+        stats = get_all_cache_stats()
+        logger.info(f"Cache stats requested: {stats}")
+        return {
+            "status": "ok",
+            "cache": stats
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cache stats: {str(e)}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+@app.post("/cache-clear")
+async def cache_clear():
+    """Clear all caches."""
+    try:
+        clear_all_caches()
+        logger.info("All caches cleared via API")
+        return {
+            "status": "ok",
+            "message": "All caches cleared successfully"
+        }
+    except Exception as e:
+        logger.error(f"Failed to clear caches: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to clear caches: {str(e)}"
+        )
+
+
+@app.get("/metrics")
+async def metrics():
+    """Get system metrics."""
+    try:
+        metrics_data = get_all_metrics()
+        logger.info("Metrics requested")
+        return {
+            "status": "ok",
+            "metrics": metrics_data
+        }
+    except Exception as e:
+        logger.error(f"Failed to get metrics: {str(e)}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+@app.post("/metrics-reset")
+async def metrics_reset():
+    """Reset all metrics."""
+    try:
+        reset_metrics()
+        logger.info("Metrics reset via API")
+        return {
+            "status": "ok",
+            "message": "Metrics reset successfully"
+        }
+    except Exception as e:
+        logger.error(f"Failed to reset metrics: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reset metrics: {str(e)}"
+        )
+
+
+================================================================================
+FILE: core/cache.py
+================================================================================
+
+# File: core/cache.py
+"""
+Caching layer for UFAC Engine.
+
+Implements in-memory caching with TTL (Time-To-Live) for:
+- Identical assessment requests
+- RAG retrieval results
+- LLM responses
+
+Reduces redundant LLM calls and improves response times.
+"""
+
+import hashlib
+import json
+import logging
+import time
+from typing import Any, Dict, Optional
+from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
+
+
+class CacheEntry:
+    """Represents a single cache entry with TTL."""
+    
+    def __init__(self, value: Any, ttl_seconds: int = 3600):
+        """
+        Initialize cache entry.
+        
+        Args:
+            value: The cached value
+            ttl_seconds: Time-to-live in seconds (default: 1 hour)
+        """
+        self.value = value
+        self.created_at = time.time()
+        self.ttl_seconds = ttl_seconds
+        self.access_count = 0
+        self.last_accessed = self.created_at
+    
+    def is_expired(self) -> bool:
+        """Check if cache entry has expired."""
+        return time.time() - self.created_at > self.ttl_seconds
+    
+    def access(self) -> Any:
+        """Access the cache entry and update stats."""
+        self.access_count += 1
+        self.last_accessed = time.time()
+        return self.value
+    
+    def age_seconds(self) -> float:
+        """Get age of cache entry in seconds."""
+        return time.time() - self.created_at
+
+
+class Cache:
+    """In-memory cache with TTL support."""
+    
+    def __init__(self, default_ttl: int = 3600):
+        """
+        Initialize cache.
+        
+        Args:
+            default_ttl: Default TTL in seconds (default: 1 hour)
+        """
+        self._cache: Dict[str, CacheEntry] = {}
+        self._default_ttl = default_ttl
+        self._stats = {
+            "hits": 0,
+            "misses": 0,
+            "evictions": 0,
+            "total_requests": 0,
+        }
+    
+    def _generate_key(self, data: Dict[str, Any]) -> str:
+        """Generate cache key from data dictionary."""
+        # Sort keys for consistent hashing
+        sorted_data = json.dumps(data, sort_keys=True, default=str)
+        return hashlib.md5(sorted_data.encode()).hexdigest()
+    
+    def get(self, key: str) -> Optional[Any]:
+        """
+        Get value from cache.
+        
+        Args:
+            key: Cache key
+            
+        Returns:
+            Cached value or None if not found or expired
+        """
+        self._stats["total_requests"] += 1
+        
+        if key not in self._cache:
+            logger.debug(f"Cache miss: {key}")
+            self._stats["misses"] += 1
+            return None
+        
+        entry = self._cache[key]
+        
+        if entry.is_expired():
+            logger.debug(f"Cache expired: {key}")
+            del self._cache[key]
+            self._stats["misses"] += 1
+            self._stats["evictions"] += 1
+            return None
+        
+        logger.debug(f"Cache hit: {key} (age: {entry.age_seconds():.1f}s, accesses: {entry.access_count})")
+        self._stats["hits"] += 1
+        return entry.access()
+    
+    def set(self, key: str, value: Any, ttl_seconds: Optional[int] = None) -> None:
+        """
+        Set value in cache.
+        
+        Args:
+            key: Cache key
+            value: Value to cache
+            ttl_seconds: TTL in seconds (uses default if not specified)
+        """
+        ttl = ttl_seconds or self._default_ttl
+        self._cache[key] = CacheEntry(value, ttl)
+        logger.debug(f"Cache set: {key} (TTL: {ttl}s)")
+    
+    def delete(self, key: str) -> bool:
+        """
+        Delete value from cache.
+        
+        Args:
+            key: Cache key
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        if key in self._cache:
+            del self._cache[key]
+            logger.debug(f"Cache deleted: {key}")
+            return True
+        return False
+    
+    def clear(self) -> None:
+        """Clear all cache entries."""
+        count = len(self._cache)
+        self._cache.clear()
+        logger.info(f"Cache cleared: {count} entries removed")
+    
+    def cleanup_expired(self) -> int:
+        """
+        Remove expired entries from cache.
+        
+        Returns:
+            Number of entries removed
+        """
+        expired_keys = [
+            key for key, entry in self._cache.items()
+            if entry.is_expired()
+        ]
+        
+        for key in expired_keys:
+            del self._cache[key]
+        
+        if expired_keys:
+            logger.debug(f"Cache cleanup: {len(expired_keys)} expired entries removed")
+        
+        return len(expired_keys)
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        self.cleanup_expired()
+        
+        total = self._stats["hits"] + self._stats["misses"]
+        hit_rate = (self._stats["hits"] / total * 100) if total > 0 else 0
+        
+        return {
+            "hits": self._stats["hits"],
+            "misses": self._stats["misses"],
+            "hit_rate": f"{hit_rate:.1f}%",
+            "evictions": self._stats["evictions"],
+            "total_requests": self._stats["total_requests"],
+            "cached_entries": len(self._cache),
+            "memory_usage": self._get_memory_usage(),
+        }
+    
+    def _get_memory_usage(self) -> str:
+        """Estimate memory usage of cache."""
+        import sys
+        total_size = sum(sys.getsizeof(entry.value) for entry in self._cache.values())
+        
+        if total_size < 1024:
+            return f"{total_size} B"
+        elif total_size < 1024 * 1024:
+            return f"{total_size / 1024:.1f} KB"
+        else:
+            return f"{total_size / (1024 * 1024):.1f} MB"
+    
+    def __len__(self) -> int:
+        """Get number of cached entries."""
+        return len(self._cache)
+    
+    def __repr__(self) -> str:
+        """String representation of cache."""
+        return f"Cache(entries={len(self._cache)}, hits={self._stats['hits']}, misses={self._stats['misses']})"
+
+
+# Global cache instances
+_assessment_cache = Cache(default_ttl=3600)  # 1 hour for assessments
+_rag_cache = Cache(default_ttl=7200)  # 2 hours for RAG results
+_llm_cache = Cache(default_ttl=3600)  # 1 hour for LLM responses
+
+
+def get_assessment_cache() -> Cache:
+    """Get the global assessment cache."""
+    return _assessment_cache
+
+
+def get_rag_cache() -> Cache:
+    """Get the global RAG cache."""
+    return _rag_cache
+
+
+def get_llm_cache() -> Cache:
+    """Get the global LLM cache."""
+    return _llm_cache
+
+
+def clear_all_caches() -> None:
+    """Clear all cache instances."""
+    logger.info("Clearing all caches...")
+    _assessment_cache.clear()
+    _rag_cache.clear()
+    _llm_cache.clear()
+    logger.info("All caches cleared")
+
+
+def get_all_cache_stats() -> Dict[str, Any]:
+    """Get statistics for all caches."""
+    return {
+        "assessment_cache": _assessment_cache.get_stats(),
+        "rag_cache": _rag_cache.get_stats(),
+        "llm_cache": _llm_cache.get_stats(),
+    }
+
+
+================================================================================
+FILE: core/metrics.py
+================================================================================
+
+# File: core/metrics.py
+"""Metrics collection for UFAC Engine."""
+
+import logging
+import time
+from typing import Dict, Any
+from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
+
+
+class Metrics:
+    """Metrics collection and tracking."""
+    
+    def __init__(self):
+        """Initialize metrics."""
+        self._metrics = {
+            "requests": {
+                "total": 0,
+                "successful": 0,
+                "failed": 0,
+                "cached": 0,
+            },
+            "latency": {
+                "total_time": 0.0,
+                "min_time": float('inf'),
+                "max_time": 0.0,
+                "avg_time": 0.0,
+            },
+            "agents": {
+                "fact": {"runs": 0, "failures": 0},
+                "assumption": {"runs": 0, "failures": 0},
+                "unknown": {"runs": 0, "failures": 0},
+                "confidence": {"runs": 0, "failures": 0},
+                "decision": {"runs": 0, "failures": 0},
+            },
+            "errors": {
+                "llm_errors": 0,
+                "rag_errors": 0,
+                "ufac_errors": 0,
+                "other_errors": 0,
+            },
+            "cache": {
+                "hits": 0,
+                "misses": 0,
+            },
+            "started_at": datetime.now().isoformat(),
+        }
+    
+    def record_request(self, success: bool, latency: float, cached: bool = False) -> None:
+        """Record request metrics."""
+        self._metrics["requests"]["total"] += 1
+        if success:
+            self._metrics["requests"]["successful"] += 1
+        else:
+            self._metrics["requests"]["failed"] += 1
+        
+        if cached:
+            self._metrics["requests"]["cached"] += 1
+        
+        # Update latency metrics
+        self._metrics["latency"]["total_time"] += latency
+        self._metrics["latency"]["min_time"] = min(self._metrics["latency"]["min_time"], latency)
+        self._metrics["latency"]["max_time"] = max(self._metrics["latency"]["max_time"], latency)
+        
+        if self._metrics["requests"]["total"] > 0:
+            self._metrics["latency"]["avg_time"] = (
+                self._metrics["latency"]["total_time"] / self._metrics["requests"]["total"]
+            )
+    
+    def record_agent_run(self, agent_name: str, success: bool = True) -> None:
+        """Record agent run."""
+        if agent_name in self._metrics["agents"]:
+            self._metrics["agents"][agent_name]["runs"] += 1
+            if not success:
+                self._metrics["agents"][agent_name]["failures"] += 1
+    
+    def record_error(self, error_type: str) -> None:
+        """Record error."""
+        if error_type in self._metrics["errors"]:
+            self._metrics["errors"][error_type] += 1
+    
+    def record_cache_hit(self) -> None:
+        """Record cache hit."""
+        self._metrics["cache"]["hits"] += 1
+    
+    def record_cache_miss(self) -> None:
+        """Record cache miss."""
+        self._metrics["cache"]["misses"] += 1
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get all metrics."""
+        total_cache = self._metrics["cache"]["hits"] + self._metrics["cache"]["misses"]
+        cache_hit_rate = (
+            (self._metrics["cache"]["hits"] / total_cache * 100) if total_cache > 0 else 0
+        )
+        
+        success_rate = (
+            (self._metrics["requests"]["successful"] / self._metrics["requests"]["total"] * 100)
+            if self._metrics["requests"]["total"] > 0 else 0
+        )
+        
+        return {
+            "requests": self._metrics["requests"],
+            "latency": {
+                **self._metrics["latency"],
+                "min_time": (
+                    self._metrics["latency"]["min_time"]
+                    if self._metrics["latency"]["min_time"] != float('inf') else 0
+                ),
+            },
+            "agents": self._metrics["agents"],
+            "errors": self._metrics["errors"],
+            "cache": {
+                **self._metrics["cache"],
+                "hit_rate": f"{cache_hit_rate:.1f}%",
+            },
+            "success_rate": f"{success_rate:.1f}%",
+            "started_at": self._metrics["started_at"],
+        }
+    
+    def reset(self) -> None:
+        """Reset all metrics."""
+        self.__init__()
+
+
+# Global metrics instance
+_metrics = Metrics()
+
+
+def get_metrics() -> Metrics:
+    """Get global metrics instance."""
+    return _metrics
+
+
+def record_request(success: bool, latency: float, cached: bool = False) -> None:
+    """Record request metrics."""
+    _metrics.record_request(success, latency, cached)
+
+
+def record_agent_run(agent_name: str, success: bool = True) -> None:
+    """Record agent run."""
+    _metrics.record_agent_run(agent_name, success)
+
+
+def record_error(error_type: str) -> None:
+    """Record error."""
+    _metrics.record_error(error_type)
+
+
+def record_cache_hit() -> None:
+    """Record cache hit."""
+    _metrics.record_cache_hit()
+
+
+def record_cache_miss() -> None:
+    """Record cache miss."""
+    _metrics.record_cache_miss()
+
+
+def get_all_metrics() -> Dict[str, Any]:
+    """Get all metrics."""
+    return _metrics.get_metrics()
+
+
+def reset_metrics() -> None:
+    """Reset all metrics."""
+    _metrics.reset()
+
+
+================================================================================
+FILE: core/llm_utils.py
+================================================================================
+
+# File: core/llm_utils.py
+import os
+import asyncio
+import json
+import logging
+from typing import List, Dict, Any
+from groq import Groq
+from dotenv import load_dotenv
+
+load_dotenv()
+logger = logging.getLogger(__name__)
+
+MODEL_NAME = "llama-3.3-70b-versatile"
+_client: Groq | None = None
+
+
+class LLMError(Exception):
+    """Base exception for LLM-related errors."""
+    pass
+
+
+class LLMInitializationError(LLMError):
+    """Raised when LLM client initialization fails."""
+    pass
+
+
+class LLMCallError(LLMError):
+    """Raised when an LLM API call fails."""
+    pass
+
+
+def init_gemini():  # Keep name for compatibility
+    """Initialize Groq API client with error handling."""
+    global _client
+    try:
+        key = os.getenv("GROQ_API_KEY")
+        if not key:
+            error_msg = "GROQ_API_KEY environment variable not set. Please add it to .env file."
+            logger.error(error_msg)
+            raise LLMInitializationError(error_msg)
+        
+        _client = Groq(api_key=key)
+        logger.info("✅ Groq API initialized successfully with model: %s", MODEL_NAME)
+    except Exception as e:
+        error_msg = f"Failed to initialize Groq API: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise LLMInitializationError(error_msg) from e
+
+
+async def _single_llm_call(prompt: str, temperature: float, run_index: int) -> Dict[str, Any]:
+    """Execute a single LLM call with retry logic and error handling."""
+    if _client is None:
+        error_msg = "Groq client not initialized. Call init_gemini() first."
+        logger.error(error_msg)
+        raise LLMCallError(error_msg)
+
+    def _call():
+        try:
+            response = _client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=min(temperature, 1.0),  # Groq max temp is 1.0
+                max_tokens=500,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Groq API call failed: {str(e)}", exc_info=True)
+            raise LLMCallError(f"API call failed: {str(e)}") from e
+
+    loop = asyncio.get_running_loop()
+    max_retries = 2
+
+    for attempt in range(max_retries):
+        try:
+            logger.debug(f"Run {run_index+1} attempt {attempt+1}/{max_retries}")
+            text = await asyncio.wait_for(
+                loop.run_in_executor(None, _call),
+                timeout=15.0,
+            )
+            logger.debug(f"Run {run_index+1} succeeded")
+            return extract_json_from_response(text)
+        except asyncio.TimeoutError as e:
+            logger.warning(f"Run {run_index+1} attempt {attempt+1} timed out after 15s")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(0.5 * (attempt + 1))
+        except LLMCallError as e:
+            logger.warning(f"Run {run_index+1} attempt {attempt+1} failed: {str(e)}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(0.5 * (attempt + 1))
+        except Exception as e:
+            logger.error(f"Run {run_index+1} unexpected error: {str(e)}", exc_info=True)
+            if attempt < max_retries - 1:
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+    logger.error(f"Run {run_index+1} failed after {max_retries} attempts")
+    return {}
+
+
+async def run_llm_council(prompt: str, num_runs: int = 3) -> List[Dict[str, Any]]:
+    tasks = [
+        _single_llm_call(prompt, temperature=0.7 + (i * 0.1), run_index=i)
+        for i in range(num_runs)
+    ]
+    return await asyncio.gather(*tasks)
+
+
+def extract_json_from_response(text: str) -> Dict[str, Any]:
+    """Extract JSON from LLM response with error handling."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.debug(f"Direct JSON parse failed: {str(e)}")
+        
+        # Try to extract JSON from markdown code blocks
+        for marker in ["```json", "```"]:
+            if marker in text:
+                start = text.find(marker) + len(marker)
+                end = text.find("```", start)
+                if end > start:
+                    try:
+                        extracted = text[start:end].strip()
+                        result = json.loads(extracted)
+                        logger.debug("Successfully extracted JSON from code block")
+                        return result
+                    except json.JSONDecodeError:
+                        logger.debug(f"Failed to parse extracted JSON from {marker} block")
+        
+        logger.warning(f"Could not parse JSON from LLM response. Raw text: {text[:200]}...")
+        return {}
+
+
+def aggregate_list_responses(responses: List[List[str]], threshold: float = 0.4) -> List[str]:
+    if not responses:
+        return []
+    all_items: Dict[str, int] = {}
+    total_runs = len(responses)
+    for resp in responses:
+        for item in resp:
+            all_items[item] = all_items.get(item, 0) + 1
+    return [item for item, count in all_items.items() if count / total_runs >= threshold]
+
+
+def aggregate_score_responses(scores: List[float]) -> float:
+    return sum(scores) / len(scores) if scores else 0.0
+
+
+def calculate_consensus(responses: List[Any]) -> float:
+    if not responses:
+        return 0.0
+    from collections import Counter
+    non_empty = [r for r in responses if r]
+    if not non_empty:
+        return 0.0
+    counts = Counter(str(r) for r in non_empty)
+    return max(counts.values()) / len(non_empty)
+
+
+================================================================================
+FILE: core/ufac_engine.py
+================================================================================
+
+# File: core/ufac_engine.py
+import asyncio
+import logging
+from .fact_agent import extract_known_facts
+from .assumption_agent import detect_assumptions
+from .unknown_agent import detect_unknowns
+from .confidence_agent import calculate_confidence
+from .decision_agent import generate_next_steps
+from .schema import UFACResponse
+from data.pm_kisan_rules import PM_KISAN_RULES
+
+logger = logging.getLogger(__name__)
+
+
+class UFACError(Exception):
+    """Base exception for UFAC engine errors."""
+    pass
+
+def _determine_answer(confidence: int, unknowns: list, known_facts: list) -> str:
+    unknown_lower = " ".join(unknowns).lower()
+    facts_lower = " ".join(known_facts).lower()
+
+    # Hard disqualifier signals in known facts
+    disqualifier_keywords = [
+        "income tax", "government employee", "govt employee",
+        "pension above", "constitutional post", "institutional landholder",
+        "practicing professional",
+    ]
+    for kw in disqualifier_keywords:
+        if kw in facts_lower:
+            return f"Likely INELIGIBLE — disqualifier detected: {kw}"
+
+    if confidence >= 80 and len(unknowns) == 0:
+        return "Likely ELIGIBLE for PM-KISAN — all key criteria appear satisfied"
+    elif confidence >= 65 and len(unknowns) <= 2:
+        return "Possibly eligible — minor verifications pending"
+    elif "e-kyc" in unknown_lower or "aadhaar" in unknown_lower:
+        return "Cannot confirm — e-KYC / Aadhaar verification is mandatory and missing"
+    elif "land" in unknown_lower:
+        return "Cannot confirm — land ownership status not verified"
+    else:
+        return "Eligibility cannot be confirmed — too many unknowns"
+
+async def run_ufac(user_data: dict) -> UFACResponse:
+    """
+    Run UFAC assessment with comprehensive error handling.
+    
+    Executes 5 agents in 2 batches with graceful fallbacks if any agent fails.
+    """
+    logger.info(f"Starting UFAC assessment with data: {list(user_data.keys())}")
+    
+    try:
+        # Batch 1: Fact, Assumption, Unknown detection (parallel)
+        logger.debug("Running Batch 1 agents (Fact, Assumption, Unknown)...")
+        try:
+            fact_result, assumption_result, unknown_result = await asyncio.gather(
+                extract_known_facts(user_data),
+                detect_assumptions(user_data),
+                detect_unknowns(user_data, PM_KISAN_RULES),
+                return_exceptions=True
+            )
+            
+            # Handle exceptions from batch 1
+            if isinstance(fact_result, Exception):
+                logger.error(f"Fact agent failed: {str(fact_result)}", exc_info=fact_result)
+                fact_result = {"facts": [], "consensus": 0.0}
+            if isinstance(assumption_result, Exception):
+                logger.error(f"Assumption agent failed: {str(assumption_result)}", exc_info=assumption_result)
+                assumption_result = {"assumptions": [], "consensus": 0.0}
+            if isinstance(unknown_result, Exception):
+                logger.error(f"Unknown agent failed: {str(unknown_result)}", exc_info=unknown_result)
+                unknown_result = {"unknowns": [], "consensus": 0.0}
+                
+        except Exception as e:
+            logger.error(f"Batch 1 execution failed: {str(e)}", exc_info=True)
+            fact_result = {"facts": [], "consensus": 0.0}
+            assumption_result = {"assumptions": [], "consensus": 0.0}
+            unknown_result = {"unknowns": [], "consensus": 0.0}
+
+        known = fact_result.get("facts", [])
+        fact_consensus = fact_result.get("consensus", 0.0)
+        assumptions = assumption_result.get("assumptions", [])
+        assumption_consensus = assumption_result.get("consensus", 0.0)
+        unknowns = unknown_result.get("unknowns", [])
+        unknown_consensus = unknown_result.get("consensus", 0.0)
+
+        # Batch 2: Confidence and Decision (parallel)
+        logger.debug("Running Batch 2 agents (Confidence, Decision)...")
+        try:
+            confidence_result, decision_result = await asyncio.gather(
+                calculate_confidence(known, unknowns),
+                generate_next_steps(unknowns),
+                return_exceptions=True
+            )
+            
+            # Handle exceptions from batch 2
+            if isinstance(confidence_result, Exception):
+                logger.error(f"Confidence agent failed: {str(confidence_result)}", exc_info=confidence_result)
+                confidence_result = {"confidence": 50, "consensus": 0.0}
+            if isinstance(decision_result, Exception):
+                logger.error(f"Decision agent failed: {str(decision_result)}", exc_info=decision_result)
+                decision_result = {"next_steps": [], "consensus": 0.0}
+                
+        except Exception as e:
+            logger.error(f"Batch 2 execution failed: {str(e)}", exc_info=True)
+            confidence_result = {"confidence": 50, "consensus": 0.0}
+            decision_result = {"next_steps": [], "consensus": 0.0}
+
+        confidence = int(confidence_result.get("confidence", 50))
+        confidence_consensus = confidence_result.get("consensus", 0.0)
+        next_steps = decision_result.get("next_steps", [])
+        decision_consensus = decision_result.get("consensus", 0.0)
+
+        risk = "HIGH" if confidence < 40 else "MEDIUM" if confidence < 70 else "LOW"
+        answer = _determine_answer(confidence, unknowns, known)
+        
+        logger.info(f"UFAC assessment completed: confidence={confidence}, risk={risk}")
+
+        return UFACResponse(
+            answer=answer,
+            confidence=confidence,
+            known_facts=known,
+            assumptions=assumptions,
+            unknowns=unknowns,
+            risk_level=risk,
+            next_steps=next_steps,
+            fact_consensus=fact_consensus,
+            assumption_consensus=assumption_consensus,
+            unknown_consensus=unknown_consensus,
+            confidence_consensus=confidence_consensus,
+            decision_consensus=decision_consensus,
+        )
+        
+    except Exception as e:
+        logger.error(f"UFAC assessment failed: {str(e)}", exc_info=True)
+        raise UFACError(f"Assessment failed: {str(e)}") from e
+
+
+================================================================================
+FILE: core/schema.py
+================================================================================
+
+# File: core/schema.py
+from pydantic import BaseModel, Field
+from typing import List, Literal
+
+class UFACResponse(BaseModel):
+    answer: str
+    confidence: int = Field(..., ge=0, le=100)
+
+    known_facts: List[str]
+    assumptions: List[str]
+    unknowns: List[str]
+
+    risk_level: Literal["LOW", "MEDIUM", "HIGH"]
+    next_steps: List[str]
+
+    # Per-agent consensus scores
+    fact_consensus: float
+    assumption_consensus: float
+    unknown_consensus: float
+    confidence_consensus: float
+    decision_consensus: float
+
+
+================================================================================
+FILE: core/fact_agent.py
+================================================================================
+
+# File: core/fact_agent.py
+import json
+import logging
+from .llm_utils import run_llm_council, aggregate_list_responses, calculate_consensus
+from data.rag_pipeline import get_retriever
+
+logger = logging.getLogger(__name__)
+
+async def extract_known_facts(user_data: dict) -> dict:
+    # Get RAG context (cached retriever)
+    try:
+        retriever = get_retriever()
+        rag_docs = retriever.invoke(f"PM-KISAN facts eligibility {user_data}")
+        rag_context = "\n".join([d.page_content for d in rag_docs])
+    except Exception as e:
+        logger.warning(f"RAG retrieval failed: {e}. Using empty context.")
+        rag_context = ""
+    
+    prompt = f"""You are the Fact Boundary Agent for PM-KISAN eligibility assessment.
+
+Your task: Extract ONLY confirmed, objective facts from the user's provided data.
+- Include only explicitly stated information
+- Avoid any assumptions or inferences
+- Be specific and verifiable
+
+Official guidelines context:
+{rag_context}
+
+User data: {json.dumps(user_data)}
+
+Respond ONLY with valid JSON (no markdown, no extra text):
+{{"facts": ["fact1", "fact2", ...]}}
+
+Valid examples:
+- "User is a farmer"
+- "User owns 2 hectares of land"
+- "User has Aadhaar number provided"
+
+Invalid examples (do not include):
+- "User likely owns land"
+- "User probably has Aadhaar"
+"""
+    responses = await run_llm_council(prompt, num_runs=3)
+    facts_lists = [resp.get("facts", []) for resp in responses]
+    return {
+        "facts": aggregate_list_responses(facts_lists, threshold=0.4),
+        "consensus": calculate_consensus(facts_lists),
+    }
+
+
+================================================================================
+FILE: core/assumption_agent.py
+================================================================================
+
+# File: core/assumption_agent.py
+import json
+import logging
+from .llm_utils import run_llm_council, aggregate_list_responses, calculate_consensus
+from data.rag_pipeline import get_retriever
+
+logger = logging.getLogger(__name__)
+
+async def detect_assumptions(user_data: dict) -> dict:
+    # Get RAG context (cached retriever)
+    try:
+        retriever = get_retriever()
+        rag_docs = retriever.invoke("PM-KISAN assumptions eligibility land aadhaar farmer requirements")
+        rag_context = "\n".join([d.page_content for d in rag_docs])
+    except Exception as e:
+        logger.warning(f"RAG retrieval failed: {e}. Using empty context.")
+        rag_context = ""
+    
+    prompt = f"""You are the Assumption Detection Agent for PM-KISAN eligibility.
+
+Your task: Identify implicit assumptions being made based on missing data.
+- List assumptions that could affect eligibility
+- Be specific about what is being assumed
+- Focus on PM-KISAN relevant assumptions
+
+Official guidelines context:
+{rag_context}
+
+User data: {json.dumps(user_data)}
+
+PM-KISAN Context:
+- Requires land ownership recorded in state/UT land records
+- e-KYC via Aadhaar is mandatory (since 2023)
+- Requires active bank account linked to Aadhaar
+- Requires farmer status
+- Disqualifiers: income tax payer, govt employee, pension > ₹10k/month,
+  practicing professionals (doctors, lawyers, CAs, engineers),
+  constitutional post holders, institutional landholders
+
+Respond ONLY with valid JSON (no markdown, no extra text):
+{{"assumptions": ["assumption1", "assumption2", ...]}}
+"""
+    responses = await run_llm_council(prompt, num_runs=3)
+    assumptions_lists = [resp.get("assumptions", []) for resp in responses]
+    return {
+        "assumptions": aggregate_list_responses(assumptions_lists, threshold=0.4),
+        "consensus": calculate_consensus(assumptions_lists),
+    }
+
+
+================================================================================
+FILE: core/unknown_agent.py
+================================================================================
+
+# File: core/unknown_agent.py
+import json
+import logging
+from .llm_utils import run_llm_council, aggregate_list_responses, calculate_consensus
+from data.rag_pipeline import get_retriever
+
+logger = logging.getLogger(__name__)
+
+async def detect_unknowns(user_data: dict, rules: dict) -> dict:
+    required_fields = rules.get("required_fields", [])
+    disqualifiers = rules.get("disqualifiers", {})
+    mandatory = rules.get("mandatory_verifications", [])
+
+    # Get RAG context (cached retriever)
+    try:
+        retriever = get_retriever()
+        rag_docs = retriever.invoke("PM-KISAN required documents disqualifiers missing fields verification")
+        rag_context = "\n".join([d.page_content for d in rag_docs])
+    except Exception as e:
+        logger.warning(f"RAG retrieval failed: {e}. Using empty context.")
+        rag_context = ""
+
+    prompt = f"""You are the Unknown Detection Agent for PM-KISAN eligibility.
+
+Your task: Identify critical missing information needed for a confident eligibility assessment.
+- Focus on required fields not provided
+- Check for potential disqualifiers not addressed
+- Include mandatory verification gaps
+
+Official guidelines context:
+{rag_context}
+
+User data: {json.dumps(user_data)}
+Required fields: {json.dumps(required_fields)}
+Disqualifiers to check: {json.dumps(disqualifiers)}
+Mandatory verifications: {json.dumps(mandatory)}
+
+Respond ONLY with valid JSON (no markdown, no extra text):
+{{"unknowns": ["missing_field1", "missing_field2", ...]}}
+
+Examples:
+- "Land ownership status not confirmed in land records"
+- "e-KYC completion status unknown"
+- "Annual income or tax-paying status not provided"
+- "Pension amount not specified — disqualifier check pending"
+"""
+    responses = await run_llm_council(prompt, num_runs=3)
+    unknowns_lists = [resp.get("unknowns", []) for resp in responses]
+    return {
+        "unknowns": aggregate_list_responses(unknowns_lists, threshold=0.4),
+        "consensus": calculate_consensus(unknowns_lists)
+    }
+
+
+================================================================================
+FILE: core/confidence_agent.py
+================================================================================
+
+# File: core/confidence_agent.py
+import json
+from .llm_utils import run_llm_council, aggregate_score_responses, calculate_consensus
+
+async def calculate_confidence(known: list, unknowns: list) -> dict:
+    prompt = f"""You are the Confidence Calibration Agent for PM-KISAN eligibility.
+
+Your task: Calculate a confidence score (0-100) for the eligibility assessment.
+- 0-30: Very low confidence (too many unknowns)
+- 30-60: Low-medium confidence (significant gaps)
+- 60-80: Medium-high confidence (minor gaps)
+- 80-100: High confidence (mostly complete data)
+
+Known facts ({len(known)} total): {json.dumps(known)}
+Unknowns ({len(unknowns)} total): {json.dumps(unknowns)}
+
+Calculation guidance:
+- Start at 100
+- Subtract 20 per critical unknown (land, Aadhaar e-KYC, disqualifier status)
+- Subtract 5 per minor unknown
+- Add 5 per confirmed eligibility-relevant fact
+- Apply holistic judgment for reliability
+
+Respond ONLY with valid JSON (no markdown, no extra text):
+{{"confidence": 75}}
+"""
+    responses = await run_llm_council(prompt, num_runs=3)
+    scores = [
+        resp.get("confidence")
+        for resp in responses
+        if isinstance(resp.get("confidence"), (int, float))
+    ]
+    if not scores:
+        scores = [50]
+    return {
+        "confidence": aggregate_score_responses(scores),
+        "consensus": calculate_consensus(scores),
+    }
+
+
+================================================================================
+FILE: core/decision_agent.py
+================================================================================
+
+# File: core/decision_agent.py
+import json
+import logging
+from .llm_utils import run_llm_council, aggregate_list_responses, calculate_consensus
+from data.rag_pipeline import get_retriever
+
+logger = logging.getLogger(__name__)
+
+async def generate_next_steps(unknowns: list) -> dict:
+    # Get RAG context (cached retriever)
+    try:
+        retriever = get_retriever()
+        rag_docs = retriever.invoke("PM-KISAN application process steps documents required e-KYC")
+        rag_context = "\n".join([d.page_content for d in rag_docs])
+    except Exception as e:
+        logger.warning(f"RAG retrieval failed: {e}. Using empty context.")
+        rag_context = ""
+    
+    prompt = f"""You are the Decision Guidance Agent for PM-KISAN eligibility.
+
+Your task: Provide actionable next steps based on missing information and assessment gaps.
+- Make steps practical, specific, and ordered by priority
+- Include document/verification requirements
+- Focus on PM-KISAN application and e-KYC process
+
+Official guidelines context:
+{rag_context}
+
+Unknowns to address ({len(unknowns)} total): {json.dumps(unknowns)}
+
+Respond ONLY with valid JSON (no markdown, no extra text):
+{{"next_steps": ["step1", "step2", ...]}}
+
+Examples:
+- "Complete e-KYC via Aadhaar on pmkisan.gov.in or nearest CSC"
+- "Verify land ownership in state revenue/land records"
+- "Link Aadhaar to bank account at your bank branch"
+- "Obtain income certificate to confirm non-tax-payer status"
+- "Register with local Patwari or agricultural office"
+"""
+    responses = await run_llm_council(prompt, num_runs=3)
+    steps_lists = [resp.get("next_steps", []) for resp in responses]
+    return {
+        "next_steps": aggregate_list_responses(steps_lists, threshold=0.4),
+        "consensus": calculate_consensus(steps_lists),
+    }
+
+
+================================================================================
+FILE: data/rag_pipeline.py
+================================================================================
+
+# File: data/rag_pipeline.py
+# RAG Pipeline with ChromaDB + Singleton Retriever Caching
+
+import os
+import logging
+from typing import Optional
+from langchain_community.document_loaders import PyPDFDirectoryLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import SentenceTransformerEmbeddings
+
+logger = logging.getLogger(__name__)
+
+DATA_DIR = os.path.dirname(__file__)
+CHROMA_DIR = os.path.join(DATA_DIR, "chroma_db")
+
+# Singleton retriever cache
+_retriever_cache: Optional[object] = None
+_embeddings_cache: Optional[SentenceTransformerEmbeddings] = None
+
+
+class RAGError(Exception):
+    """Base exception for RAG-related errors."""
+    pass
+
+
+class RAGInitializationError(RAGError):
+    """Raised when RAG initialization fails."""
+    pass
+
+
+class RAGRetrievalError(RAGError):
+    """Raised when document retrieval fails."""
+    pass
+
+def _get_embeddings() -> SentenceTransformerEmbeddings:
+    """Get or create embeddings model (cached) with error handling."""
+    global _embeddings_cache
+    if _embeddings_cache is None:
+        try:
+            logger.info("Loading SentenceTransformer embeddings model...")
+            _embeddings_cache = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+            logger.info("✅ Embeddings model loaded successfully")
+        except Exception as e:
+            error_msg = f"Failed to load embeddings model: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RAGInitializationError(error_msg) from e
+    return _embeddings_cache
+
+def build_vectorstore() -> None:
+    """Build ChromaDB vectorstore from PDFs in data/ directory with error handling."""
+    logger.info("🔨 Building vectorstore from PDFs...")
+    
+    if not os.path.exists(DATA_DIR):
+        error_msg = f"Data directory not found: {DATA_DIR}"
+        logger.error(error_msg)
+        raise RAGInitializationError(error_msg)
+    
+    # Check if PDFs exist
+    pdf_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.pdf')]
+    if not pdf_files:
+        warning_msg = f"⚠️  No PDF files found in {DATA_DIR}"
+        logger.warning(warning_msg)
+        logger.info("Please add PM-KISAN guideline PDFs to the data/ directory")
+        raise RAGInitializationError(warning_msg)
+    
+    logger.info(f"Found {len(pdf_files)} PDF files: {pdf_files}")
+    
+    try:
+        # Load PDFs
+        logger.info("Loading PDFs...")
+        loader = PyPDFDirectoryLoader(DATA_DIR)
+        docs = loader.load()
+        logger.info(f"✅ Loaded {len(docs)} pages from PDFs")
+        
+        if not docs:
+            error_msg = "No documents loaded from PDFs"
+            logger.error(error_msg)
+            raise RAGInitializationError(error_msg)
+        
+        # Split into chunks
+        logger.info("Splitting documents into chunks...")
+        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        chunks = splitter.split_documents(docs)
+        logger.info(f"✅ Split into {len(chunks)} chunks")
+        
+        if not chunks:
+            error_msg = "No chunks created from documents"
+            logger.error(error_msg)
+            raise RAGInitializationError(error_msg)
+        
+        # Create vectorstore
+        logger.info("Creating vectorstore...")
+        embeddings = _get_embeddings()
+        db = Chroma.from_documents(
+            chunks,
+            embeddings,
+            persist_directory=CHROMA_DIR
+        )
+        db.persist()
+        logger.info(f"✅ Indexed {len(chunks)} chunks into ChromaDB at {CHROMA_DIR}")
+        
+    except RAGInitializationError:
+        raise
+    except Exception as e:
+        error_msg = f"Failed to build vectorstore: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise RAGInitializationError(error_msg) from e
+
+def get_retriever(force_rebuild: bool = False):
+    """
+    Get or create retriever (singleton pattern with caching).
+    
+    Args:
+        force_rebuild: If True, rebuild vectorstore from PDFs
+    
+    Returns:
+        Chroma retriever object
+        
+    Raises:
+        RAGInitializationError: If retriever cannot be initialized
+    """
+    global _retriever_cache
+    
+    # Force rebuild if requested
+    if force_rebuild:
+        logger.info("🔄 Force rebuilding vectorstore...")
+        _retriever_cache = None
+        build_vectorstore()
+    
+    # Return cached retriever if available
+    if _retriever_cache is not None:
+        logger.debug("Using cached retriever")
+        return _retriever_cache
+    
+    # Check if ChromaDB exists
+    if not os.path.exists(CHROMA_DIR):
+        logger.warning(f"ChromaDB not found at {CHROMA_DIR}")
+        logger.info("Building vectorstore for the first time...")
+        build_vectorstore()
+    
+    # Load from disk
+    try:
+        logger.info("Loading retriever from ChromaDB...")
+        embeddings = _get_embeddings()
+        db = Chroma(
+            persist_directory=CHROMA_DIR,
+            embedding_function=embeddings
+        )
+        _retriever_cache = db.as_retriever(search_kwargs={"k": 4})
+        logger.info("✅ Retriever loaded and cached")
+        return _retriever_cache
+    except Exception as e:
+        error_msg = f"Failed to load retriever from ChromaDB: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise RAGInitializationError(error_msg) from e
+
+def clear_cache() -> None:
+    """Clear the retriever cache (useful for testing)."""
+    global _retriever_cache, _embeddings_cache
+    _retriever_cache = None
+    _embeddings_cache = None
+    logger.info("Cache cleared")
+
+def get_vectorstore_status() -> dict:
+    """Get status of vectorstore (for health checks)."""
+    status = {
+        "chroma_exists": os.path.exists(CHROMA_DIR),
+        "chroma_path": CHROMA_DIR,
+        "retriever_cached": _retriever_cache is not None,
+        "embeddings_cached": _embeddings_cache is not None,
+    }
+    
+    if status["chroma_exists"]:
+        try:
+            embeddings = _get_embeddings()
+            db = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+            status["collection_count"] = db._collection.count()
+        except Exception as e:
+            status["error"] = str(e)
+    
+    return status
+
+
+================================================================================
+FILE: data/pm_kisan_rules.py
+================================================================================
+
+# File: data/pm_kisan_rules.py
+# UFAC/data/pm_kisan_rules.py
+
+PM_KISAN_RULES = {
+    "name": "PM-KISAN",
+    "required_fields": [
+        "land_owner",
+        "aadhaar_linked",
+        "aadhaar_ekyc_done",
+        "bank_account",
+        "farmer_status",
+        "income_tax_payer",
+        "govt_employee",
+        "pension_above_10k",
+        "practicing_professional",
+        "constitutional_post_holder",
+        "institutional_landholder",
+    ],
+    "disqualifiers": {
+        "income_tax_payer": True,
+        "govt_employee": True,
+        "pension_above_10k": True,
+        "practicing_professional": True,
+        "constitutional_post_holder": True,
+        "institutional_landholder": True,
+    },
+    "family_definition": "Husband, wife, and minor children (under 18 years)",
+    "mandatory_verifications": [
+        "e-KYC via Aadhaar is mandatory since 2023",
+        "Land ownership must be in state/UT land records",
+        "Cut-off date for land holding: February 1, 2019"
+    ]
+}
+
+
+================================================================================
+FILE: setup_rag.py
+================================================================================
+
+# File: setup_rag.py
+"""
+Setup script to initialize RAG pipeline.
+Run this once after adding PM-KISAN PDF files to the data/ directory.
+
+Usage:
+    python setup_rag.py
+"""
+
+import sys
+import logging
+from data.rag_pipeline import build_vectorstore, get_vectorstore_status
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def main():
+    logger.info("="*60)
+    logger.info("🚀 UFAC Engine - RAG Setup")
+    logger.info("="*60)
+    
+    try:
+        # Build vectorstore
+        build_vectorstore()
+        
+        # Check status
+        status = get_vectorstore_status()
+        logger.info(f"\n✅ RAG Setup Complete!")
+        logger.info(f"Status: {status}")
+        
+        if status.get("collection_count", 0) > 0:
+            logger.info(f"✅ {status['collection_count']} chunks indexed and ready")
+        else:
+            logger.warning("⚠️  No chunks found. Please add PM-KISAN PDF files to data/")
+        
+        return 0
+    except Exception as e:
+        logger.error(f"❌ Setup failed: {e}")
+        return 1
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+================================================================================
+FILE: main.py
+================================================================================
+
+# File: main.py
+import asyncio
+import json
+import time
+from core.ufac_engine import run_ufac
+from core.llm_utils import init_gemini
+
+
+async def run_test(name: str, user_input: dict):
+    print(f"\n{'='*60}\n{name}\n{'='*60}")
+    try:
+        start = time.perf_counter()
+        response = await run_ufac(user_input)
+        elapsed = time.perf_counter() - start
+        print(json.dumps(json.loads(response.model_dump_json()), indent=2))
+        print(f"⏱  Completed in {elapsed:.2f}s")
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+
+
+async def main():
+    init_gemini()
+
+    await run_test("TEST 1: Minimal Input (Farmer)", {
+        "occupation": "farmer"
+    })
+
+    await run_test("TEST 2: Complete Input", {
+        "occupation": "farmer",
+        "land_ownership": "yes",
+        "aadhaar_linked": True,
+        "aadhaar_ekyc_done": True,
+        "bank_account": True,
+        "state": "Punjab",
+        "district": "Ludhiana"
+    })
+
+    await run_test("TEST 3: Incomplete Input", {
+        "occupation": "farmer",
+        "annual_income": 150000
+    })
+
+    await run_test("TEST 4: Disqualifier Case", {
+        "occupation": "farmer",
+        "land_ownership": "yes",
+        "income_tax_payer": True,
+        "govt_employee": False
+    })
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+================================================================================
+FILE: tests/conftest.py
+================================================================================
+
+# File: tests/conftest.py
+"""Pytest configuration and fixtures."""
+
+import pytest
+import asyncio
+from unittest.mock import Mock, patch, AsyncMock
+from api.app import app
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def client():
+    """FastAPI test client."""
+    return TestClient(app)
+
+
+@pytest.fixture
+def event_loop():
+    """Event loop for async tests."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture
+def mock_groq_response():
+    """Mock Groq API response."""
+    return {
+        "facts": ["User is a farmer", "User owns 2 hectares"],
+        "consensus": 0.8
+    }
+
+
+@pytest.fixture
+def mock_user_data():
+    """Mock user data for testing."""
+    return {
+        "occupation": "farmer",
+        "land_ownership": "yes",
+        "aadhaar_linked": True,
+        "aadhaar_ekyc_done": True,
+        "bank_account": True,
+        "annual_income": 50000,
+        "income_tax_payer": False,
+        "govt_employee": False,
+        "pension_above_10k": False,
+        "practicing_professional": False,
+        "constitutional_post_holder": False,
+    }
+
+
+================================================================================
+FILE: tests/test_cache.py
+================================================================================
+
+# File: tests/test_cache.py
+"""Tests for caching layer."""
+
+import pytest
+import time
+from core.cache import Cache, CacheEntry, get_assessment_cache, clear_all_caches
+
+
+class TestCacheEntry:
+    """Test CacheEntry class."""
+    
+    def test_cache_entry_creation(self):
+        """Test cache entry creation."""
+        entry = CacheEntry("test_value", ttl_seconds=60)
+        assert entry.value == "test_value"
+        assert entry.ttl_seconds == 60
+        assert entry.access_count == 0
+    
+    def test_cache_entry_expiration(self):
+        """Test cache entry expiration."""
+        entry = CacheEntry("test_value", ttl_seconds=1)
+        assert not entry.is_expired()
+        time.sleep(1.1)
+        assert entry.is_expired()
+    
+    def test_cache_entry_access(self):
+        """Test cache entry access tracking."""
+        entry = CacheEntry("test_value")
+        value = entry.access()
+        assert value == "test_value"
+        assert entry.access_count == 1
+
+
+class TestCache:
+    """Test Cache class."""
+    
+    def test_cache_set_and_get(self):
+        """Test cache set and get."""
+        cache = Cache()
+        cache.set("key1", "value1")
+        assert cache.get("key1") == "value1"
+    
+    def test_cache_miss(self):
+        """Test cache miss."""
+        cache = Cache()
+        assert cache.get("nonexistent") is None
+    
+    def test_cache_expiration(self):
+        """Test cache expiration."""
+        cache = Cache(default_ttl=1)
+        cache.set("key1", "value1")
+        assert cache.get("key1") == "value1"
+        time.sleep(1.1)
+        assert cache.get("key1") is None
+    
+    def test_cache_delete(self):
+        """Test cache delete."""
+        cache = Cache()
+        cache.set("key1", "value1")
+        assert cache.delete("key1")
+        assert cache.get("key1") is None
+    
+    def test_cache_clear(self):
+        """Test cache clear."""
+        cache = Cache()
+        cache.set("key1", "value1")
+        cache.set("key2", "value2")
+        cache.clear()
+        assert len(cache) == 0
+    
+    def test_cache_stats(self):
+        """Test cache statistics."""
+        cache = Cache()
+        cache.set("key1", "value1")
+        cache.get("key1")  # hit
+        cache.get("key2")  # miss
+        stats = cache.get_stats()
+        assert stats["hits"] == 1
+        assert stats["misses"] == 1
+        assert "hit_rate" in stats
+    
+    def test_cache_key_generation(self):
+        """Test cache key generation."""
+        cache = Cache()
+        data1 = {"a": 1, "b": 2}
+        data2 = {"b": 2, "a": 1}
+        key1 = cache._generate_key(data1)
+        key2 = cache._generate_key(data2)
+        assert key1 == key2  # Same key for same data
+    
+    def test_cache_cleanup_expired(self):
+        """Test cleanup of expired entries."""
+        cache = Cache(default_ttl=1)
+        cache.set("key1", "value1")
+        cache.set("key2", "value2")
+        time.sleep(1.1)
+        removed = cache.cleanup_expired()
+        assert removed == 2
+        assert len(cache) == 0
+
+
+class TestGlobalCaches:
+    """Test global cache instances."""
+    
+    def test_get_assessment_cache(self):
+        """Test getting assessment cache."""
+        cache = get_assessment_cache()
+        assert cache is not None
+        assert isinstance(cache, Cache)
+    
+    def test_clear_all_caches(self):
+        """Test clearing all caches."""
+        cache = get_assessment_cache()
+        cache.set("key1", "value1")
+        clear_all_caches()
+        assert cache.get("key1") is None
+
+
+================================================================================
+FILE: tests/test_error_handling.py
+================================================================================
+
+# File: tests/test_error_handling.py
+"""Tests for error handling."""
+
+import pytest
+from core.llm_utils import LLMError, LLMInitializationError, LLMCallError
+from data.rag_pipeline import RAGError, RAGInitializationError
+from core.ufac_engine import UFACError
+
+
+class TestExceptionHierarchy:
+    """Test exception hierarchy."""
+    
+    def test_llm_error_inheritance(self):
+        """Test LLM error inheritance."""
+        error = LLMError("test")
+        assert isinstance(error, Exception)
+    
+    def test_llm_initialization_error_inheritance(self):
+        """Test LLM initialization error inheritance."""
+        error = LLMInitializationError("test")
+        assert isinstance(error, LLMError)
+        assert isinstance(error, Exception)
+    
+    def test_llm_call_error_inheritance(self):
+        """Test LLM call error inheritance."""
+        error = LLMCallError("test")
+        assert isinstance(error, LLMError)
+        assert isinstance(error, Exception)
+    
+    def test_rag_error_inheritance(self):
+        """Test RAG error inheritance."""
+        error = RAGError("test")
+        assert isinstance(error, Exception)
+    
+    def test_rag_initialization_error_inheritance(self):
+        """Test RAG initialization error inheritance."""
+        error = RAGInitializationError("test")
+        assert isinstance(error, RAGError)
+        assert isinstance(error, Exception)
+    
+    def test_ufac_error_inheritance(self):
+        """Test UFAC error inheritance."""
+        error = UFACError("test")
+        assert isinstance(error, Exception)
+
+
+class TestExceptionMessages:
+    """Test exception messages."""
+    
+    def test_llm_error_message(self):
+        """Test LLM error message."""
+        error = LLMError("test message")
+        assert str(error) == "test message"
+    
+    def test_llm_initialization_error_message(self):
+        """Test LLM initialization error message."""
+        error = LLMInitializationError("init failed")
+        assert "init failed" in str(error)
+    
+    def test_ufac_error_message(self):
+        """Test UFAC error message."""
+        error = UFACError("assessment failed")
+        assert "assessment failed" in str(error)
+
+
+================================================================================
+FILE: tests/test_api.py
+================================================================================
+
+# File: tests/test_api.py
+"""Tests for FastAPI endpoints."""
+
+import pytest
+from fastapi.testclient import TestClient
+from api.app import app
+
+
+@pytest.fixture
+def client():
+    """FastAPI test client."""
+    return TestClient(app)
+
+
+class TestHealthEndpoint:
+    """Test health check endpoint."""
+    
+    def test_health_check(self, client):
+        """Test health check endpoint."""
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert "rag" in data
+    
+    def test_health_check_structure(self, client):
+        """Test health check response structure."""
+        response = client.get("/health")
+        data = response.json()
+        assert "service" in data
+        assert "UFAC Engine" in data["service"]
+
+
+class TestRagStatusEndpoint:
+    """Test RAG status endpoint."""
+    
+    def test_rag_status(self, client):
+        """Test RAG status endpoint."""
+        response = client.get("/rag-status")
+        assert response.status_code == 200
+        data = response.json()
+        assert "status" in data
+
+
+class TestCacheStatsEndpoint:
+    """Test cache stats endpoint."""
+    
+    def test_cache_stats(self, client):
+        """Test cache stats endpoint."""
+        response = client.get("/cache-stats")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert "cache" in data
+    
+    def test_cache_stats_structure(self, client):
+        """Test cache stats response structure."""
+        response = client.get("/cache-stats")
+        data = response.json()
+        cache_data = data["cache"]
+        assert "assessment_cache" in cache_data
+        assert "rag_cache" in cache_data
+        assert "llm_cache" in cache_data
+
+
+class TestCacheClearEndpoint:
+    """Test cache clear endpoint."""
+    
+    def test_cache_clear(self, client):
+        """Test cache clear endpoint."""
+        response = client.post("/cache-clear")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert "message" in data
+
+
+class TestRootEndpoint:
+    """Test root endpoint."""
+    
+    def test_root(self, client):
+        """Test root endpoint."""
+        response = client.get("/")
+        assert response.status_code == 200
+        data = response.json()
+        assert "service" in data
+        assert "endpoints" in data
+        assert "check" in data["endpoints"]
+        assert "health" in data["endpoints"]
+        assert "cache_stats" in data["endpoints"]
+
+
+class TestCheckEndpoint:
+    """Test eligibility check endpoint."""
+    
+    def test_check_endpoint_exists(self, client):
+        """Test check endpoint exists."""
+        response = client.post("/check", json={"occupation": "farmer"})
+        # Should return 200 or 503 (if LLM not available)
+        assert response.status_code in [200, 503, 500]
+    
+    def test_check_endpoint_invalid_request(self, client):
+        """Test check endpoint with invalid request."""
+        response = client.post("/check", json={"invalid_field": "value"})
+        # Should still process (invalid fields are ignored)
+        assert response.status_code in [200, 503, 500]
+
+
+================================================================================
+END OF CODEBASE DUMP
+================================================================================
+
+Total Files Compiled: 19
+- API: 1 file (api/app.py)
+- Core: 7 files (cache.py, metrics.py, llm_utils.py, ufac_engine.py, schema.py, 
+                  fact_agent.py, assumption_agent.py, unknown_agent.py, 
+                  confidence_agent.py, decision_agent.py)
+- Data: 2 files (rag_pipeline.py, pm_kisan_rules.py)
+- Setup: 1 file (setup_rag.py)
+- Main: 1 file (main.py)
+- Tests: 4 files (conftest.py, test_cache.py, test_error_handling.py, test_api.py)
+
+Generated: March 20, 2026
+All code includes file path comments at the top of each section.

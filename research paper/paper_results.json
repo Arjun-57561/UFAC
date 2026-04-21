@@ -1,0 +1,172 @@
+{
+  "metadata": {
+    "timestamp": "2026-04-09T20:10:56.229659",
+    "model": "Groq llama-3.3-70b-versatile",
+    "total_tests": 4,
+    "average_confidence": 78.25,
+    "average_processing_time": 4.5
+  },
+  "consensus_scores": {
+    "Fact Consensus": 0.8,
+    "Assumption Consensus": 0.75,
+    "Unknown Consensus": 0.78,
+    "Confidence Consensus": 0.79,
+    "Decision Consensus": 0.76
+  },
+  "test_results": [
+    {
+      "test_name": "TEST 1: Complete Eligible Farmer",
+      "input": {
+        "occupation": "farmer",
+        "land_ownership": "yes",
+        "land_size_hectares": 1.5,
+        "aadhaar_linked": true,
+        "aadhaar_ekyc_done": true,
+        "bank_account": true,
+        "state": "Punjab",
+        "district": "Ludhiana",
+        "income_tax_payer": false,
+        "govt_employee": false
+      },
+      "output": {
+        "answer": "Likely ELIGIBLE for PM-KISAN",
+        "confidence": 87,
+        "known_facts": [
+          "User is a farmer",
+          "User owns land: yes",
+          "Aadhaar linked: True",
+          "Bank account: True"
+        ],
+        "assumptions": [
+          "Land is cultivable agricultural land",
+          "User is not an institutional landowner"
+        ],
+        "unknowns": [],
+        "risk_level": "LOW",
+        "next_steps": [
+          "Verify land ownership documents",
+          "Complete Aadhaar eKYC if not done",
+          "Submit application through PM-KISAN portal",
+          "Provide bank account details for DBT"
+        ],
+        "fact_consensus": 0.88,
+        "assumption_consensus": 0.82,
+        "unknown_consensus": 0.9,
+        "confidence_consensus": 0.87,
+        "decision_consensus": 0.85
+      },
+      "processing_time_seconds": 4.5
+    },
+    {
+      "test_name": "TEST 2: Incomplete Information",
+      "input": {
+        "occupation": "farmer",
+        "annual_income": 150000
+      },
+      "output": {
+        "answer": "INSUFFICIENT INFORMATION - Cannot determine eligibility",
+        "confidence": 45,
+        "known_facts": [
+          "User is a farmer",
+          "Annual income: 150000"
+        ],
+        "assumptions": [
+          "User may own agricultural land",
+          "User may have Aadhaar"
+        ],
+        "unknowns": [
+          "Land ownership status",
+          "Land size (hectares)",
+          "Aadhaar linkage status",
+          "Bank account availability",
+          "State and district information",
+          "Income tax payer status"
+        ],
+        "risk_level": "HIGH",
+        "next_steps": [
+          "Provide land ownership details",
+          "Specify land size in hectares",
+          "Confirm Aadhaar linkage status",
+          "Provide bank account information",
+          "Specify state and district"
+        ],
+        "fact_consensus": 0.5,
+        "assumption_consensus": 0.45,
+        "unknown_consensus": 0.4,
+        "confidence_consensus": 0.48,
+        "decision_consensus": 0.42
+      },
+      "processing_time_seconds": 2.5
+    },
+    {
+      "test_name": "TEST 3: Disqualified (Income Tax Payer)",
+      "input": {
+        "occupation": "farmer",
+        "land_ownership": "yes",
+        "income_tax_payer": true,
+        "govt_employee": false
+      },
+      "output": {
+        "answer": "INELIGIBLE for PM-KISAN",
+        "confidence": 92,
+        "known_facts": [
+          "User is a farmer",
+          "Income tax payer: True",
+          "Government employee: False"
+        ],
+        "assumptions": [],
+        "unknowns": [],
+        "risk_level": "NONE",
+        "next_steps": [
+          "User is excluded from PM-KISAN due to income tax payer status",
+          "Consider other agricultural schemes that may be applicable"
+        ],
+        "fact_consensus": 0.95,
+        "assumption_consensus": 0.9,
+        "unknown_consensus": 0.93,
+        "confidence_consensus": 0.92,
+        "decision_consensus": 0.91
+      },
+      "processing_time_seconds": 4.5
+    },
+    {
+      "test_name": "TEST 4: Marginal Farmer",
+      "input": {
+        "occupation": "farmer",
+        "land_ownership": "yes",
+        "land_size_hectares": 0.8,
+        "aadhaar_linked": true,
+        "bank_account": true,
+        "state": "Uttar Pradesh"
+      },
+      "output": {
+        "answer": "Likely ELIGIBLE for PM-KISAN",
+        "confidence": 89,
+        "known_facts": [
+          "User is a farmer",
+          "User owns land: yes",
+          "Aadhaar linked: True",
+          "Bank account: True"
+        ],
+        "assumptions": [
+          "Land is cultivable agricultural land",
+          "User is not an institutional landowner"
+        ],
+        "unknowns": [],
+        "risk_level": "LOW",
+        "next_steps": [
+          "Verify land ownership documents",
+          "Complete Aadhaar eKYC if not done",
+          "Submit application through PM-KISAN portal",
+          "Provide bank account details for DBT"
+        ],
+        "fact_consensus": 0.88,
+        "assumption_consensus": 0.82,
+        "unknown_consensus": 0.9,
+        "confidence_consensus": 0.87,
+        "decision_consensus": 0.85
+      },
+      "processing_time_seconds": 6.5
+    }
+  ]
+}

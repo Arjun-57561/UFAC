@@ -1,0 +1,196 @@
+Here’s a clean, detailed write‑up of your extended idea that you can reuse in reports, PPTs, or viva. You can copy sections as needed.
+
+***
+
+## Title
+
+Hierarchical LLM Council for an Uncertainty‑First Agentic AI System
+
+***
+
+## Core Idea
+
+We extend the Uncertainty‑First Agent Council by adding a **mini LLM council inside each agent**.  
+Instead of a single model output per agent, multiple LLM instances (or multiple runs of the same LLM) collaborate on that agent’s sub‑task, and their outputs are aggregated.  
+This creates *two levels of agency*:
+
+- **Outer level:** Different agents (Fact Boundary, Assumption, Unknown Detection, Temporal, Confidence Calibration, Decision Guidance) focusing on different questions.  
+- **Inner level:** For each agent, several LLM runs that debate or independently solve the same sub‑task, and a small aggregation module that combines their results.
+
+The goal is to further reduce hallucinations and overconfidence by requiring **agreement both across agents and within each agent**.
+
+***
+
+## Motivation
+
+1. **Single LLM outputs can be unstable**  
+   A single call to an LLM can miss an important unknown, misread a number, or over‑simplify assumptions. Small prompt changes or randomness can change the answer.
+
+2. **High‑stakes domains need redundancy**  
+   In domains like government schemes, legal pre‑screening, or financial compliance, it is safer to ask the same sub‑question to multiple “opinions” and check for consensus before trusting the result.
+
+3. **Uncertainty as a system‑level variable**  
+   The original council already measures information completeness, assumption risk, and time sensitivity. A per‑agent LLM council adds **agreement level** as another measurable signal of epistemic uncertainty.
+
+***
+
+## High‑Level Architecture
+
+1. **User query → Query Processor**  
+   - Extracts structured fields (age, income, state, category, documents, etc.) and sets the domain.
+
+2. **Outer Council (existing agents)**  
+   - Fact Boundary Agent – what is certainly true?  
+   - Assumption Agent – what are we assuming?  
+   - Unknown Detection Agent – what is missing?  
+   - Temporal Uncertainty Agent – what could change over time?  
+   - Confidence Calibration Agent – how confident can we be?  
+   - Decision Guidance Agent – what should the user do?
+
+3. **Inner Council (new extension)**  
+   For selected agents, instead of a single model run, we do:
+
+   - Run LLM multiple times (or use multiple models) with the **same role prompt and schema**.  
+   - Collect multiple structured outputs for that agent.  
+   - Aggregate them using simple, transparent rules (majority vote, averaging, “most conservative” policy).  
+   - Compute an **internal consensus score** for that agent.
+
+4. **Decision Aggregator**  
+   - Combines all agent outputs and their internal consensus scores.  
+   - Produces final answer, calibrated confidence, explicit knowns/unknowns, and safety recommendation.
+
+***
+
+## How an Inner LLM Council Works (per Agent)
+
+### 1. Example: Unknown Detection Agent
+
+**Task:** Identify which critical fields are missing (age, income, state, category, documents, specific scheme) and why they matter.
+
+**Inner council flow:**
+
+1. The orchestrator prepares a prompt for the Unknown Detection role, including:
+   - Original user query  
+   - Parsed entities from the Query Processor  
+   - Known facts and assumptions from previous agents  
+   - JSON schema for the missing_information list and completeness score
+
+2. The orchestrator sends this prompt to the LLM **N times** (e.g., 3 times) or to N different models.
+
+3. Each run returns a JSON object listing:
+   - Which fields are missing  
+   - Importance level of each field  
+   - information_completeness_score
+
+4. An aggregation module:
+   - **Majority vote on missing fields:**  
+     A field is considered missing if at least 2 of 3 runs mark it as missing.  
+   - **Score aggregation:**  
+     information_completeness_score = average of all runs.  
+   - **Disagreement tracking:**  
+     For each field, compute how many runs disagreed; this becomes part of the agent’s internal uncertainty.
+
+5. The final Unknown Detection output includes:
+   - Aggregated missing_information list  
+   - Aggregated completeness score  
+   - An **internal_consensus_score_unknown** (e.g., percentage of fields where all runs agreed).  
+   - Notes explaining that certain fields are controversial among the models.
+
+**Effect:**  
+If one run mistakenly thinks “state” is present while the other two agree it is missing, the system still marks it as missing and treats that disagreement as a sign of higher epistemic uncertainty.
+
+***
+
+### 2. Example: Decision Guidance Agent
+
+**Task:** Turn all analysis into user‑facing guidance:  
+answer style (direct / cautious / no decision), explicit knowns/unknowns, and next steps.
+
+**Inner council flow:**
+
+1. The orchestrator prepares a rich context prompt for Decision Guidance, including:
+   - The user query  
+   - Outputs from all previous agents  
+   - The calibrated confidence and safety_flag suggestion  
+   - Required JSON schema for the final recommendation
+
+2. The same prompt is sent to the LLM multiple times.
+
+3. Each run proposes:
+   - final_answer_style  
+   - user_friendly_summary  
+   - lists of explicit_knowns, explicit_unknowns, assumptions_highlighted  
+   - recommended_next_steps  
+   - its own view of calibrated_confidence and safety_flag
+
+4. Aggregation:
+   - **Safety flag:** choose the **most conservative** option  
+     (if any run says “unsafe_to_answer”, final safety_flag is “unsafe_to_answer”).  
+   - **Answer style:** map from safety_flag to answer style  
+     (“unsafe” → no_direct_decision, “caution” → cautious_tentative_decision, “safe” → direct_decision).  
+   - **Confidence:** use the **minimum** or a trimmed mean of all proposed confidence scores.  
+   - **Knowns/unknowns/assumptions:** take the **union** of items, de‑duplicate similar entries.  
+
+5. The final Decision Guidance output adds an **internal_consensus_score_decision** such as:
+   - percentage of runs that agree on the safety_flag  
+   - spread between minimum and maximum proposed confidence.
+
+**Effect:**  
+If two runs say “answer with caution” and one says “safe to answer”, the final system still remains cautious. This greatly reduces the risk of an over‑optimistic recommendation.
+
+***
+
+## New Uncertainty Metrics
+
+The extended system can report additional metrics:
+
+1. **Within‑Agent Consensus**  
+   - For each agent where an inner council is used, compute a consensus score between 0 and 1 (or 0–100%).  
+   - Example:  
+     - Unknown Detection: 0.9 = 90% agreement on which fields are missing.  
+     - Decision Guidance: 0.67 = only 2 out of 3 runs agree on the safety flag.
+
+2. **Cross‑Agent Consensus**  
+   - Already present in your design: how much the different agents support a similar overall judgment.
+
+3. **Combined Epistemic Uncertainty**  
+   - Confidence Calibration can integrate these internal consensus values:  
+     - Lower confidence if within‑agent consensus is low, even when information completeness is high.  
+     - Increase confidence slightly when all inner councils and outer agents strongly agree.
+
+This allows you to say things like:  
+> “We are 45% confident because several critical fields are missing and the decision agents themselves disagree on whether it is safe to answer.”
+
+***
+
+## Trade‑Offs and Design Choices
+
+1. **Latency and Cost**  
+   - Multiple LLM calls per agent increase response time and API usage.  
+   - For a PBL project, you can restrict inner councils to 1–2 critical agents (e.g., Unknown Detection and Decision Guidance) to stay practical.
+
+2. **Complexity vs. Explainability**  
+   - The aggregation logic must remain simple and transparent: majority vote, conservative safety flag, average or min confidence.  
+   - This aligns with your theme of *explicit* modeling of uncertainty.
+
+3. **Implementation Strategy**  
+   - Start with your existing rule‑based/heuristic agents.  
+   - Wrap one agent (Unknown Detection) with an LLM council as a proof‑of‑concept.  
+   - If resources allow, extend the same pattern to Decision Guidance.  
+   - Document clearly which agents are rule‑based, which are LLM‑based, and where inner councils are used.
+
+***
+
+## How to Present This as “Future Work / Extension”
+
+In your report or PPT, you can have a slide like:
+
+> **Extension: Hierarchical LLM Councils per Agent**  
+> - For key agents (Unknown Detection, Decision Guidance), we run a small LLM council instead of a single model.  
+> - Each council produces multiple candidate outputs; we aggregate them using majority voting and conservative rules.  
+> - We use within‑agent agreement as an extra signal of epistemic uncertainty.  
+> - This further reduces hallucinations and guards against single‑model failure in high‑stakes decisions.
+
+This framing will make the idea sound research‑oriented, but still grounded and implementable.
+
+If you’d like, I can now help you write a short “technical design” subsection with pseudo‑code or equations for how to compute the within‑agent consensus score and how the Confidence Calibration agent should incorporate it into the final confidence.

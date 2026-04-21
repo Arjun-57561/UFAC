@@ -1,0 +1,134 @@
+{
+  "metadata": {
+    "timestamp": "2026-04-09T21:15:13.764134",
+    "total_samples": 8,
+    "model": "Groq llama-3.3-70b-versatile"
+  },
+  "classification_metrics": {
+    "accuracy": 100.0,
+    "per_class": {
+      "ELIGIBLE": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 4
+      },
+      "ABSTAIN": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 2
+      },
+      "INELIGIBLE": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 2
+      }
+    },
+    "macro_averaged": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0
+    },
+    "micro_averaged": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0
+    }
+  },
+  "calibration_metrics": {
+    "expected_calibration_error": 0.2175,
+    "maximum_calibration_error": 0.55,
+    "brier_score": 0.07970000000000001,
+    "confidence_accuracy_correlation": 0
+  },
+  "confusion_matrix": {
+    "matrix": [
+      [
+        2,
+        0,
+        0
+      ],
+      [
+        0,
+        4,
+        0
+      ],
+      [
+        0,
+        0,
+        2
+      ]
+    ],
+    "classes": [
+      "ABSTAIN",
+      "ELIGIBLE",
+      "INELIGIBLE"
+    ]
+  },
+  "latency_metrics": {
+    "mean": 4.2875,
+    "median": 4.3,
+    "std": 1.1439378261076953,
+    "min": 2.5,
+    "max": 6.5,
+    "p95": 6.044999999999999,
+    "p99": 6.409
+  },
+  "consensus_metrics": {
+    "fact": {
+      "mean": 0.8025,
+      "std": 0.16887495373796552,
+      "min": 0.5,
+      "max": 0.96
+    },
+    "assumption": {
+      "mean": 0.755,
+      "std": 0.16970562748477142,
+      "min": 0.45,
+      "max": 0.92
+    },
+    "unknown": {
+      "mean": 0.785,
+      "std": 0.20432816741702547,
+      "min": 0.4,
+      "max": 0.94
+    },
+    "confidence": {
+      "mean": 0.78625,
+      "std": 0.16977466683813577,
+      "min": 0.48,
+      "max": 0.94
+    },
+    "decision": {
+      "mean": 0.76,
+      "std": 0.1848648154733615,
+      "min": 0.42,
+      "max": 0.93
+    },
+    "overall": {
+      "mean": 0.7777499999999999,
+      "std": 0.180907262153845,
+      "min": 0.4,
+      "max": 0.96
+    }
+  },
+  "abstention_metrics": {
+    "abstention_rate": 0.25,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "true_abstentions": 2,
+    "false_abstentions": 0,
+    "missed_abstentions": 0
+  },
+  "information_extraction_metrics": {
+    "avg_facts_extracted": 3.25,
+    "avg_assumptions_identified": 1.375,
+    "avg_unknowns_detected": 1.375,
+    "total_facts": 26,
+    "total_assumptions": 11,
+    "total_unknowns": 11
+  }
+}

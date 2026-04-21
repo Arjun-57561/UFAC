@@ -1,0 +1,133 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Light theme - Agricultural green palette */
+  --bg-primary: 120 25% 96%;
+  --bg-secondary: 0 0% 100%;
+  --bg-card: 120 20% 98%;
+  --bg-input: 0 0% 100%;
+  --text-primary: 140 60% 10%;
+  --text-secondary: 140 50% 25%;
+  --text-muted: 140 20% 45%;
+  --border: 120 30% 85%;
+  --accent: 142 76% 36%;
+  --accent-hover: 142 76% 30%;
+  --accent-glow: 142 76% 36%;
+  --danger: 0 72% 51%;
+  --warning: 32 95% 44%;
+  --success: 142 76% 36%;
+  
+  /* Keep existing for compatibility */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --radius: 0.625rem;
+}
+
+.dark {
+  /* Dark theme - Deep green with subtle glow */
+  --bg-primary: 140 40% 3%;
+  --bg-secondary: 140 30% 6%;
+  --bg-card: 140 25% 8%;
+  --bg-input: 140 35% 5%;
+  --text-primary: 120 30% 92%;
+  --text-secondary: 142 40% 65%;
+  --text-muted: 140 15% 40%;
+  --border: 140 30% 15%;
+  --accent: 142 71% 45%;
+  --accent-hover: 142 76% 36%;
+  --accent-glow: 142 71% 45%;
+  --danger: 0 72% 51%;
+  --warning: 32 95% 44%;
+  --success: 142 71% 45%;
+  
+  /* Keep existing for compatibility */
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback';
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  
+  html {
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+  
+  body {
+    @apply bg-[hsl(var(--bg-primary))] text-[hsl(var(--text-primary))];
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Floating particles animation */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0) translateX(0);
+  }
+  25% {
+    transform: translateY(-20px) translateX(10px);
+  }
+  50% {
+    transform: translateY(-10px) translateX(-10px);
+  }
+  75% {
+    transform: translateY(-30px) translateX(5px);
+  }
+}
+
+.particle {
+  position: absolute;
+  border-radius: 50%;
+  background: hsl(var(--accent) / 0.15);
+  animation: float linear infinite;
+  will-change: transform;
+  pointer-events: none;
+}
